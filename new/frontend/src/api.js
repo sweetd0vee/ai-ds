@@ -54,6 +54,31 @@ export async function getJobStatus(jobId) {
   return res.json()
 }
 
+export async function fetchJobHistory() {
+  const res = await fetch(`${API_BASE}/jobs`)
+  if (!res.ok) throw new Error('Не удалось загрузить историю анализов')
+  const data = await res.json()
+  return data.jobs || []
+}
+
+export async function deleteHistoryJob(jobId) {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(parseApiDetail(err.detail, 'Не удалось удалить запись'))
+  }
+  return res.json()
+}
+
+export async function clearHistory() {
+  const res = await fetch(`${API_BASE}/jobs`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(parseApiDetail(err.detail, 'Не удалось очистить историю'))
+  }
+  return res.json()
+}
+
 export function streamJobStatus(jobId, onUpdate, onError) {
   const source = new EventSource(`${API_BASE}/jobs/${jobId}/stream`)
 

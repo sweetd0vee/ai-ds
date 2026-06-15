@@ -3,7 +3,7 @@ export function sectionHasData(sectionId, results) {
 
   const checks = {
     preview: results.preview,
-    structure: results.data_structure || results.data_structure_raw,
+    structure: results.data_structure || results.parsed_data_structure || results.data_structure_raw,
     insights: results.quality_report,
     metrics_plan: results.metrics_plan_dict,
     calculation_code: results.calculation_code,

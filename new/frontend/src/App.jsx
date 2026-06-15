@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LayoutGroup, motion } from 'framer-motion'
-import { fetchConfig, startAnalysis } from './api'
+import { fetchConfig, getJobStatus, startAnalysis } from './api'
 import { useJobStream } from './hooks/useJobStream'
 import { useSettings } from './hooks/useSettings'
 import { formatElapsed } from './utils/format'
 import AppHeader from './components/AppHeader'
 import ErrorAlert from './components/ErrorAlert'
+import HistoryModal from './components/HistoryModal'
 import SettingsModal from './components/SettingsModal'
 import UploadSection from './components/UploadSection'
 import PipelineStepper from './components/PipelineStepper'
@@ -25,7 +26,7 @@ export default function App() {
   const inputRef = useRef(null)
   const timerRef = useRef(null)
 
-  const { job, loading, error, setError, startStream, setLoading } = useJobStream()
+  const { job, loading, error, setError, setJob, setLoading, startStream, resetJob } = useJobStream()
   const {
     settings,
     draft,
@@ -37,6 +38,7 @@ export default function App() {
   } = useSettings()
   const [analystModels, setAnalystModels] = useState([])
   const [modelsLoading, setModelsLoading] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const isAnalysisMode = Boolean(job || loading)
 
@@ -70,7 +72,8 @@ export default function App() {
     setError(null)
     setJobId(null)
     setElapsed(0)
-  }, [setError])
+    resetJob()
+  }, [setError, resetJob])
 
   const onDrop = useCallback((e) => {
     e.preventDefault()
@@ -78,8 +81,47 @@ export default function App() {
     handleFile(e.dataTransfer.files[0])
   }, [handleFile])
 
+  const handleClearFile = useCallback(() => {
+    setFile(null)
+    setJobId(null)
+    setElapsed(0)
+    setActiveSection('preview')
+    setError(null)
+    resetJob()
+  }, [resetJob, setError])
+
+  const handleOpenHistory = useCallback(() => setHistoryOpen(true), [])
+  const handleCloseHistory = useCallback(() => setHistoryOpen(false), [])
+
+  const handleSelectHistory = useCallback(async (item) => {
+    setHistoryOpen(false)
+    setError(null)
+    setActiveSection('preview')
+    setGraphCount(item.graph_count)
+    setFile({ name: item.filename, size: 0, fromHistory: true })
+
+    try {
+      const data = await getJobStatus(item.job_id)
+      setJobId(data.job_id)
+      setJob(data)
+      setLoading(data.status === 'running')
+      if (data.status === 'running') {
+        startStream(data.job_id)
+      }
+    } catch (e) {
+      setError(e.message)
+      handleClearFile()
+    }
+  }, [handleClearFile, setError, setJob, setLoading, startStream])
+
+  const handleHistoryDeleted = useCallback((deletedId) => {
+    if (deletedId === null || deletedId === jobId) {
+      handleClearFile()
+    }
+  }, [handleClearFile, jobId])
+
   const onAnalyze = async () => {
-    if (!file) return
+    if (!file || file.fromHistory) return
     setLoading(true)
     setError(null)
     setElapsed(0)
@@ -107,14 +149,20 @@ export default function App() {
     onDragOver: (e) => { e.preventDefault(); setDragOver(true) },
     onDragLeave: () => setDragOver(false),
     onAnalyze,
-    onClear: () => setFile(null),
+    onClear: handleClearFile,
     onGraphCount: setGraphCount,
     inputRef,
   }
 
   return (
     <div className="app-shell">
-      <AppHeader onOpenSettings={openSettings} />
+      <div className="app-bg" />
+      <div
+        className={`app-bg-glow${isAnalysisMode ? ' app-bg-glow--subtle' : ''}`}
+        aria-hidden
+      />
+
+      <AppHeader onOpenSettings={openSettings} onOpenHistory={handleOpenHistory} />
 
       <SettingsModal
         open={modalOpen}
@@ -126,10 +174,14 @@ export default function App() {
         onCancel={closeSettings}
       />
 
-      <div className={`app ${isAnalysisMode ? 'app--analysis' : 'app--hero'}`}>
-        <div className="app-bg" />
-        {!isAnalysisMode && <div className="app-bg-glow" aria-hidden />}
+      <HistoryModal
+        open={historyOpen}
+        onClose={handleCloseHistory}
+        onSelect={handleSelectHistory}
+        onDeleted={handleHistoryDeleted}
+      />
 
+      <div className={`app ${isAnalysisMode ? 'app--analysis' : 'app--hero'}`}>
         <LayoutGroup>
           {!isAnalysisMode ? (
             <motion.div

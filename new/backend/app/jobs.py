@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import shutil
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -59,6 +60,8 @@ class JobStore:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 data.setdefault("analyst_model", "qwen3:8b")
+                if "results" in data:
+                    data["results"] = JobStore._normalize_results(data.get("results")) or {}
                 return Job(**data)
             except Exception:
                 logger.exception("Failed to load job state %s", job_id)
@@ -113,6 +116,32 @@ class JobStore:
         self._save_to_disk(job)
         return job
 
+    def list_all(self) -> list[Job]:
+        self._load_all_from_disk()
+        jobs = list(self._jobs.values())
+        jobs.sort(key=lambda j: j.created_at, reverse=True)
+        return jobs
+
+    def delete(self, job_id: str) -> bool:
+        job_dir = JOBS_DIR / job_id
+        existed = job_id in self._jobs or job_dir.is_dir()
+        self._jobs.pop(job_id, None)
+        self._listeners.pop(job_id, None)
+        if job_dir.is_dir():
+            shutil.rmtree(job_dir)
+        return existed
+
+    def delete_all(self) -> int:
+        self._load_all_from_disk()
+        count = len(self._jobs)
+        self._jobs.clear()
+        self._listeners.clear()
+        if JOBS_DIR.exists():
+            for job_dir in JOBS_DIR.iterdir():
+                if job_dir.is_dir():
+                    shutil.rmtree(job_dir, ignore_errors=True)
+        return count
+
     def get(self, job_id: str) -> Job | None:
         job = self._jobs.get(job_id)
         if job:
@@ -141,7 +170,16 @@ class JobStore:
             await queue.put(payload)
 
     @staticmethod
+    def _normalize_results(results: dict | None) -> dict | None:
+        if not results:
+            return results
+        if results.get("data_structure") or not results.get("parsed_data_structure"):
+            return results
+        return {**results, "data_structure": results["parsed_data_structure"]}
+
+    @staticmethod
     def _enrich_results(results: dict | None) -> dict | None:
+        results = JobStore._normalize_results(results)
         if not results:
             return results
         raw = results.get("hypotheses_raw")
@@ -177,7 +215,9 @@ class JobStore:
         partial: dict | None = None,
     ):
         async with self._lock:
-            job = self._jobs[job_id]
+            job = self._jobs.get(job_id)
+            if not job:
+                return
             job.status = "running"
             job.step = step
             job.progress = progress
@@ -190,7 +230,9 @@ class JobStore:
 
     async def complete(self, job_id: str, results: dict):
         async with self._lock:
-            job = self._jobs[job_id]
+            job = self._jobs.get(job_id)
+            if not job:
+                return
             job.status = "completed"
             job.step = "completed"
             job.progress = 100
@@ -202,7 +244,9 @@ class JobStore:
 
     async def fail(self, job_id: str, error: str, partial_results: dict | None = None):
         async with self._lock:
-            job = self._jobs[job_id]
+            job = self._jobs.get(job_id)
+            if not job:
+                return
             job.status = "failed"
             job.error = error
             job.message = f"Ошибка: {error}"

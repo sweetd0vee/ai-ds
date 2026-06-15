@@ -18,7 +18,7 @@ function formatStructureStats(col) {
 }
 
 export default function StructureView({ results }) {
-  const structure = results?.data_structure
+  const structure = results?.data_structure || results?.parsed_data_structure
   const columns = structure?.columns || []
   const datetimeCandidates = structure?.datetime_candidates || []
 

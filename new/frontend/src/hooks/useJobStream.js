@@ -34,7 +34,24 @@ export function useJobStream() {
     )
   }, [stopStream])
 
+  const resetJob = useCallback(() => {
+    stopStream()
+    setJob(null)
+    setLoading(false)
+    setError(null)
+  }, [stopStream])
+
   useEffect(() => () => stopStream(), [stopStream])
 
-  return { job, loading, error, setError, startStream, setLoading }
+  return {
+    job,
+    loading,
+    error,
+    setError,
+    setJob,
+    setLoading,
+    startStream,
+    stopStream,
+    resetJob,
+  }
 }

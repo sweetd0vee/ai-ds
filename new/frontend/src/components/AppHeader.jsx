@@ -1,6 +1,6 @@
-import { Settings, Sparkles } from 'lucide-react'
+import { History, Settings, Sparkles } from 'lucide-react'
 
-export default function AppHeader({ onOpenSettings }) {
+export default function AppHeader({ onOpenSettings, onOpenHistory }) {
   return (
     <header className="app-header">
       <div className="app-header-inner">
@@ -12,6 +12,15 @@ export default function AppHeader({ onOpenSettings }) {
         </div>
 
         <div className="app-header-actions">
+          <button
+            type="button"
+            className="app-header-settings"
+            onClick={onOpenHistory}
+            aria-label="История"
+            title="История анализов"
+          >
+            <History size={22} strokeWidth={2} />
+          </button>
           <button
             type="button"
             className="app-header-settings"

@@ -10,7 +10,15 @@ from ..config import JOBS_DIR, settings
 from ..core.pipeline import run_analysis_pipeline
 from ..jobs import JobStore
 from ..core.sandbox import run_sandbox_code
-from ..models import AppConfigResponse, JobCreateResponse, JobStatusResponse, RunCodeRequest, RunCodeResponse
+from ..models import (
+    AppConfigResponse,
+    JobCreateResponse,
+    JobListItem,
+    JobListResponse,
+    JobStatusResponse,
+    RunCodeRequest,
+    RunCodeResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +88,44 @@ async def start_analysis(
     except Exception as exc:
         logger.exception("Failed to start analysis")
         raise HTTPException(500, f"Не удалось запустить анализ: {exc}") from exc
+
+
+@router.get("/jobs", response_model=JobListResponse)
+async def list_jobs():
+    items: list[JobListItem] = []
+    for job in job_store.list_all():
+        shape = (job.results or {}).get("shape")
+        rows = cols = None
+        if isinstance(shape, (list, tuple)) and len(shape) >= 2:
+            rows, cols = int(shape[0]), int(shape[1])
+        items.append(
+            JobListItem(
+                job_id=job.id,
+                filename=job.filename,
+                status=job.status,
+                progress=job.progress,
+                graph_count=job.graph_count,
+                analyst_model=job.analyst_model,
+                created_at=job.created_at,
+                updated_at=job.updated_at,
+                rows=rows,
+                cols=cols,
+            )
+        )
+    return JobListResponse(jobs=items)
+
+
+@router.delete("/jobs")
+async def clear_jobs():
+    deleted = job_store.delete_all()
+    return {"deleted": deleted}
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    if not job_store.delete(job_id):
+        raise HTTPException(404, "Задача не найдена")
+    return {"job_id": job_id}
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)

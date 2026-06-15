@@ -69,7 +69,7 @@ def convert_numpy_types(obj):
     return obj
 
 
-def static_code_analysis(code_str: str, context_name: str = "") -> list[str]:
+def static_code_analysis(code_str: str) -> list[str]:
     warnings = []
     try:
         ast.parse(code_str)

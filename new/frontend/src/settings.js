@@ -3,14 +3,14 @@ const STORAGE_KEY = 'ds-app-settings'
 const LIGHT_THEMES = new Set(['light', 'ocean'])
 
 export const THEMES = [
-  { id: 'light', label: 'Светлая' },
-  { id: 'dark', label: 'Тёмная' },
-  { id: 'ocean', label: 'Океан' },
-  { id: 'dracula', label: 'Dracula' },
-  { id: 'nord', label: 'Nord' },
-  { id: 'solarized', label: 'Solarized' },
-  { id: 'catppuccin', label: 'Catppuccin' },
-  { id: 'monokai', label: 'Monokai' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+  { id: 'ocean', label: 'Ocean' },
+  { id: 'dracula', label: 'Amethyst' },
+  { id: 'nord', label: 'Northern Lights' },
+  { id: 'solarized', label: 'Sea Depth' },
+  { id: 'catppuccin', label: 'Lavender' },
+  { id: 'monokai', label: 'Neon' },
 ]
 
 const DEFAULT_ANALYST_MODEL = 'qwen3:8b'

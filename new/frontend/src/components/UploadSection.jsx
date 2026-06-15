@@ -57,7 +57,7 @@ export default function UploadSection({
               <FileSpreadsheet size={compact ? 28 : 40} className="file-icon" />
               <div className="file-meta">
                 <strong title={file.name}>{file.name}</strong>
-                <span>{formatFileSize(file.size)}</span>
+                <span>{file.fromHistory ? 'из истории' : formatFileSize(file.size)}</span>
               </div>
               {!loading && (
                 <button className="icon-btn" onClick={onClear} title="Убрать файл" type="button">
@@ -100,7 +100,7 @@ export default function UploadSection({
 
       <motion.button
         className={`btn-primary ${compact ? 'btn-primary--compact' : 'btn-primary--hero'}`}
-        disabled={!file || loading}
+        disabled={!file || loading || file.fromHistory}
         onClick={onAnalyze}
         whileHover={{ scale: file && !loading ? 1.02 : 1 }}
         whileTap={{ scale: file && !loading ? 0.98 : 1 }}

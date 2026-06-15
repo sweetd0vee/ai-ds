@@ -53,7 +53,9 @@ const SECTION_DOWNLOADS = [
     section: 'structure',
     filename: 'data_structure.xlsx',
     label: 'Структура XLSX',
-    when: (_, results) => Boolean(results?.data_structure?.columns?.length),
+    when: (_, results) => Boolean(
+      results?.data_structure?.columns?.length || results?.parsed_data_structure?.columns?.length,
+    ),
   },
   {
     section: 'report',

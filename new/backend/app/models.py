@@ -34,6 +34,23 @@ class RunCodeResponse(BaseModel):
     warnings: list[str] = []
 
 
+class JobListItem(BaseModel):
+    job_id: str
+    filename: str
+    status: str
+    progress: int = 0
+    graph_count: int = 20
+    analyst_model: str = "qwen3:8b"
+    created_at: str
+    updated_at: str
+    rows: int | None = None
+    cols: int | None = None
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobListItem]
+
+
 class AppConfigResponse(BaseModel):
     analyst_models: list[str]
     default_analyst_model: str

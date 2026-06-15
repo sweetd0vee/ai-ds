@@ -37,7 +37,7 @@ def run_sandbox_code(
         }
 
     final_code = "\n".join(SANDBOX_IMPORTS + [clean_code])
-    warnings = static_code_analysis(final_code, "sandbox")
+    warnings = static_code_analysis(final_code)
 
     df = load_dataframe(file_path)
     if df is None or df.empty:
