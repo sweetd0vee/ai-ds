@@ -1,0 +1,25 @@
+/* Стили компонентов, зависящие от тёмного режима (data-theme-mode задаётся в settings.js) */
+
+[data-theme-mode="dark"] .kind-numeric { background: #1e3a5f; color: #93c5fd; }
+[data-theme-mode="dark"] .kind-categorical { background: #3b2667; color: #c4b5fd; }
+[data-theme-mode="dark"] .kind-datetime { background: #064e3b; color: #6ee7b7; }
+[data-theme-mode="dark"] .kind-boolean { background: #78350f; color: #fcd34d; }
+[data-theme-mode="dark"] .kind-identifier { background: #374151; color: #d1d5db; }
+[data-theme-mode="dark"] .kind-textual { background: #500724; color: #f9a8d4; }
+
+[data-theme-mode="dark"] .quality-score-card.grade-good {
+  background: linear-gradient(135deg, #064e3b33 0%, #065f4633 100%);
+}
+
+[data-theme-mode="dark"] .quality-score-card.grade-fair {
+  background: linear-gradient(135deg, #78350f33 0%, #92400e33 100%);
+}
+
+[data-theme-mode="dark"] .quality-score-card.grade-poor {
+  background: linear-gradient(135deg, #7f1d1d33 0%, #991b1b33 100%);
+}
+
+[data-theme-mode="dark"] .issue-tag {
+  background: #78350f55;
+  color: #fcd34d;
+}
