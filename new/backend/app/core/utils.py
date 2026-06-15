@@ -1,10 +1,8 @@
-import re
 import ast
-import logging
+import re
+
 import numpy as np
 import pandas as pd
-
-logger = logging.getLogger(__name__)
 
 
 def extract_python_code(markdown_text) -> str:
@@ -90,25 +88,3 @@ def static_code_analysis(code_str: str, context_name: str = "") -> list[str]:
                     f"Потенциальная проблема resample в строке {i + 1}: {line.strip()}"
                 )
     return warnings
-
-
-def build_file_info_summary(df: pd.DataFrame, label: str = "сырые данные") -> str:
-    from io import StringIO
-
-    buffer = StringIO()
-    df.info(buf=buffer)
-    df_info = buffer.getvalue()
-    return (
-        f"DataFrame Info ({label}):\n{df_info}\n"
-        f"DataFrame Head:\n{df.head(10).to_string()}\n"
-        f"DataFrame Dtypes:\n{df.dtypes.to_string()}\n"
-        f"DataFrame Shape: {df.shape}\n"
-    )
-
-
-def build_df_structure_info(df: pd.DataFrame) -> str:
-    info = f"DataFrame имеет {df.shape[0]} строк и {df.shape[1]} столбцов.\n"
-    info += "Типы данных столбцов (после обработки):\n"
-    for col in df.columns:
-        info += f"  - {col}: {df[col].dtype}\n"
-    return info

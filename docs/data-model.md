@@ -42,6 +42,7 @@ interface JobStatusResponse {
 | `quality_report_raw` | `str` | data_insights | Текст + JSON |
 | `correlations` | `object` | data_insights | Пары и коэффициенты |
 | `correlations_raw` | `str` | data_insights | Текст + JSON |
+| `insights_report_raw` | `str` | data_insights | Объединённый текст для UI |
 | `metrics_plan_raw` | `str` | metrics_plan | Текст плана |
 | `metrics_plan_dict` | `dict` | metrics_plan | `{column: [metrics]}` |
 | `calculation_code` | `str` | metrics_calculation | Справочный псевдокод |
@@ -54,6 +55,7 @@ interface JobStatusResponse {
 | `viz_output` | `str` | viz_generation | Лог построения |
 | `code_warnings_viz` | `list` | viz_generation | Предупреждения визуализации |
 | `plot_files` | `list[str]` | viz_generation | Имена PNG |
+| `plot_details` | `list[dict]` | viz_generation | Метаданные графиков (тип, столбцы, описание) |
 | `final_report` | `str` | final_report | Итоговый TXT-отчёт |
 
 ---
@@ -176,6 +178,7 @@ data/jobs/{job_id}/
     ├── data_structure.xlsx
     ├── quality_report.txt
     ├── correlations.txt
+    ├── quality_insights.xlsx
     ├── generated_calculation_code.py
     ├── generated_visualization_code.py
     ├── analysis_summary_report.txt
@@ -184,6 +187,7 @@ data/jobs/{job_id}/
     ├── hypotheses_report.docx
     ├── final_report.txt
     ├── final_report.docx
+    ├── plots_report.docx
     └── plot_001.png … plot_NNN.png
 ```
 

@@ -8,7 +8,7 @@ import traceback
 import numpy as np
 import pandas as pd
 
-from .data_analysis import compute_metrics, format_metrics_results
+from .data_analysis import compute_metrics, format_metrics_results, format_metrics_summary
 from .loaders import load_dataframe
 from .preprocess import preprocess_dates_based_on_llm
 from .utils import extract_python_code, static_code_analysis
@@ -58,6 +58,7 @@ def run_sandbox_code(
         "metrics_plan": metrics_plan or {},
         "compute_metrics": compute_metrics,
         "format_metrics_results": format_metrics_results,
+        "format_metrics_summary": format_metrics_summary,
     }
 
     stdout = io.StringIO()

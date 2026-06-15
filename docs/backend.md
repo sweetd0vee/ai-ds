@@ -15,10 +15,11 @@
 
 ```python
 class Settings:
-    analyst_model: str = "qwen3:8b"
-    coder_model: str = "qwen3-coder:latest"  # не используется
+    ollama_base_url: str = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    analyst_model: str = os.environ.get("ANALYST_MODEL", "qwen3:8b")
+    coder_model: str = os.environ.get("CODER_MODEL", "qwen3-coder:latest")  # не используется
     analyst_models: list[str]  # whitelist для POST /analyze
-    cors_origins: list[str]
+    cors_origins: list[str]    # из CORS_ORIGINS (5173, 8080, …)
 ```
 
 Пути:
@@ -86,11 +87,11 @@ class Settings:
 
 ### `core/visualization.py`
 
-`generate_visualizations(df, output_dir, max_plots)`:
+`generate_visualizations(df, output_dir, max_plots, correlations=None, parsed_structure=None)`:
 
-- Выбирает типы графиков по составу данных.
+- Выбирает типы графиков по составу данных и корреляциям.
 - Сохраняет `plot_001.png`, `plot_002.png`, …
-- Возвращает `(files, code_reference, log)`.
+- Возвращает `(files, code_reference, log, plot_details)`.
 
 ### `core/reports.py`
 
@@ -134,9 +135,12 @@ chain_invoke(prompt, output_key, llm, partial={})  # asyncio.to_thread
 | Модуль | Функция | Формат |
 |--------|---------|--------|
 | `structure_export.py` | `build_structure_xlsx` | XLSX с цветными типами |
+| `quality_export.py` | `build_quality_xlsx`, `format_insights_report` | XLSX качества и связей |
 | `analysis_export.py` | `build_analysis_docx` | DOCX анализа (`**bold**`, списки) |
 | `hypotheses_export.py` | `build_hypotheses_docx` | DOCX гипотез с приоритетами |
 | `report_export.py` | `build_report_docx` | DOCX итогового отчёта по секциям |
+| `plots_export.py` | `ensure_plots_report_docx` | DOCX с PNG-графиками и пояснениями |
+| `plot_insights.py` | `rebuild_plot_details` | Восстановление метаданных графиков для старых задач |
 
 ---
 

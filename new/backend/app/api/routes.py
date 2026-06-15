@@ -147,9 +147,7 @@ async def run_job_code(job_id: str, body: RunCodeRequest):
 
     results = job.results or {}
     datetime_candidates = (
-        results.get("parsed_data_structure", {}).get("datetime_candidates")
-        or results.get("data_structure", {}).get("datetime_candidates")
-        or []
+        results.get("data_structure", {}).get("datetime_candidates") or []
     )
     metrics_plan = results.get("metrics_plan_dict") or {}
 
@@ -168,9 +166,11 @@ async def download_file(job_id: str, filename: str):
     allowed = {
         "final_report.txt", "final_report.docx",
         "analysis_summary_report.txt", "analysis_summary_report.docx",
-        "hypotheses_report.txt", "hypotheses_report.docx",
+        "hypotheses_report.docx",
+        "plots_report.docx",
         "generated_calculation_code.py", "generated_visualization_code.py",
         "quality_report.txt", "correlations.txt",
+        "quality_insights.xlsx",
         "data_structure.xlsx",
     }
     if filename not in allowed:
@@ -191,6 +191,23 @@ async def download_file(job_id: str, filename: str):
             build_structure_xlsx(structure, file_path)
         except Exception as exc:
             logger.exception("Failed to build data_structure.xlsx for job %s", job_id)
+            raise HTTPException(500, f"Не удалось сформировать XLSX: {exc}") from exc
+    elif filename == "quality_insights.xlsx" and not file_path.exists():
+        quality = job.results.get("quality_report")
+        correlations = job.results.get("correlations")
+        if not quality or not correlations:
+            raise HTTPException(404, "Отчёт о качестве не найден")
+        from ..core.quality_export import build_quality_xlsx
+
+        try:
+            build_quality_xlsx(
+                quality,
+                correlations,
+                file_path,
+                source_file=job.filename,
+            )
+        except Exception as exc:
+            logger.exception("Failed to build quality_insights.xlsx for job %s", job_id)
             raise HTTPException(500, f"Не удалось сформировать XLSX: {exc}") from exc
     elif filename == "analysis_summary_report.docx":
         analysis = job.results.get("analysis_summary")
@@ -220,6 +237,29 @@ async def download_file(job_id: str, filename: str):
         except Exception as exc:
             logger.exception("Failed to build hypotheses_report.docx for job %s", job_id)
             raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
+    elif filename == "plots_report.docx":
+        plot_files = job.results.get("plot_files") or []
+        if not plot_files:
+            raise HTTPException(404, "Графики не найдены")
+
+        from ..core.plots_export import ensure_plots_report_docx
+
+        parsed = job.results.get("data_structure") or {}
+        try:
+            await asyncio.to_thread(
+                ensure_plots_report_docx,
+                Path(job.output_dir),
+                plot_files,
+                plot_details=job.results.get("plot_details"),
+                source_file=job.filename,
+                correlations=job.results.get("correlations"),
+                viz_output=job.results.get("viz_output", ""),
+                dataset_path=job.file_path,
+                datetime_candidates=parsed.get("datetime_candidates") or [],
+            )
+        except Exception as exc:
+            logger.exception("Failed to build plots_report.docx for job %s", job_id)
+            raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
     elif filename == "final_report.docx":
         report = job.results.get("final_report")
         if not report:
@@ -236,9 +276,11 @@ async def download_file(job_id: str, filename: str):
 
     media_types = {
         "data_structure.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "quality_insights.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "final_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "analysis_summary_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "hypotheses_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "plots_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
     return FileResponse(
         file_path,

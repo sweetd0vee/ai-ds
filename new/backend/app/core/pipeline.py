@@ -2,10 +2,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from docx import Document
-
 from .analysis_export import build_analysis_docx
-from .hypotheses import format_hypotheses_text, parse_hypotheses
+from .hypotheses import parse_hypotheses
 from .hypotheses_export import build_hypotheses_docx
 from .report_export import build_report_docx
 from .data_analysis import (
@@ -21,13 +19,14 @@ from .data_insights import (
     format_correlations,
     format_quality_report,
 )
+from .plots_export import ensure_plots_report_docx
+from .quality_export import build_quality_xlsx, format_insights_report
 from .loaders import load_dataframe
 from .llm import chain_invoke, get_llm_analyst
 from .preprocess import preprocess_dates_based_on_llm
 from .prompts import DATA_ANALYZE, DATA_HYPOTHESES
 from .reports import build_final_report
 from .structure_export import build_structure_xlsx
-from .utils import convert_numpy_types
 from .visualization import generate_visualizations
 from ..config import PREVIEW_ROWS
 from ..jobs import JobStore
@@ -35,25 +34,21 @@ from ..jobs import JobStore
 logger = logging.getLogger(__name__)
 
 
+def _truncate(text: str, limit: int = 5000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n… (сокращено для LLM)"
+
+
 def _save_text(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
-def _save_docx(path: Path, title: str, content: str):
-    doc = Document()
-    doc.add_heading(title, level=1)
-    for line in content.splitlines():
-        if line.strip():
-            doc.add_paragraph(line)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(path))
-
-
-async def _save_reports_parallel(
+async def _save_analysis_reports(
     output_dir: Path,
     analysis_summary: str,
-    final_report: str | None = None,
+    *,
     source_file: str = "",
     hypotheses: list[dict] | None = None,
     hypotheses_raw: str = "",
@@ -68,9 +63,7 @@ async def _save_reports_parallel(
         ),
     ]
     if hypotheses is not None:
-        hypotheses_text = format_hypotheses_text(hypotheses) if hypotheses else (hypotheses_raw or "")
-        tasks.extend([
-            asyncio.to_thread(_save_text, output_dir / "hypotheses_report.txt", hypotheses_text),
+        tasks.append(
             asyncio.to_thread(
                 build_hypotheses_docx,
                 hypotheses,
@@ -78,18 +71,25 @@ async def _save_reports_parallel(
                 source_file=source_file,
                 raw_fallback=hypotheses_raw,
             ),
-        ])
-    if final_report:
-        tasks.extend([
-            asyncio.to_thread(_save_text, output_dir / "final_report.txt", final_report),
-            asyncio.to_thread(
-                build_report_docx,
-                final_report,
-                output_dir / "final_report.docx",
-                source_file=source_file,
-            ),
-        ])
+        )
     await asyncio.gather(*tasks)
+
+
+async def _save_final_report(
+    output_dir: Path,
+    final_report: str,
+    *,
+    source_file: str = "",
+):
+    await asyncio.gather(
+        asyncio.to_thread(_save_text, output_dir / "final_report.txt", final_report),
+        asyncio.to_thread(
+            build_report_docx,
+            final_report,
+            output_dir / "final_report.docx",
+            source_file=source_file,
+        ),
+    )
 
 
 async def run_analysis_pipeline(job_id: str, store: JobStore):
@@ -125,7 +125,6 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         state.update({
             "data_structure_raw": structure_raw,
             "data_structure": parsed_structure,
-            "parsed_data_structure": parsed_structure,
         })
         await asyncio.to_thread(
             build_structure_xlsx,
@@ -146,15 +145,24 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         )
         quality_report_raw = format_quality_report(quality_report)
         correlations_raw = format_correlations(correlations)
+        insights_report_raw = format_insights_report(quality_report, correlations)
         state.update({
             "quality_report": quality_report,
             "quality_report_raw": quality_report_raw,
             "correlations": correlations,
             "correlations_raw": correlations_raw,
+            "insights_report_raw": insights_report_raw,
         })
         await asyncio.gather(
             asyncio.to_thread(_save_text, output_dir / "quality_report.txt", quality_report_raw),
             asyncio.to_thread(_save_text, output_dir / "correlations.txt", correlations_raw),
+            asyncio.to_thread(
+                build_quality_xlsx,
+                quality_report,
+                correlations,
+                output_dir / "quality_insights.xlsx",
+                source_file=job.filename,
+            ),
         )
         await store.update(
             job_id, "data_insights", 30, "Качество и связи готовы", partial=state
@@ -185,15 +193,9 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         )
         metrics_results_raw = format_metrics_results(metrics_results)
         state["metrics_results_raw"] = metrics_results_raw
-        state["code_warnings_metrics"] = []
         await store.update(job_id, "metrics_calculation", 55, "Метрики рассчитаны", partial=state)
 
         await store.update(job_id, "metrics_analysis", 60, "Анализ метрик (LLM)")
-        def _truncate(text: str, limit: int = 5000) -> str:
-            if len(text) <= limit:
-                return text
-            return text[:limit] + "\n… (сокращено для LLM)"
-
         analysis_summary = await chain_invoke(
             DATA_ANALYZE,
             "analysis_summary",
@@ -204,9 +206,6 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
                 "correlations_raw": _truncate(correlations_raw, 4000),
             },
         )
-        analysis_summary = convert_numpy_types(analysis_summary)
-        if not isinstance(analysis_summary, str):
-            analysis_summary = str(analysis_summary)
         state["analysis_summary"] = analysis_summary
         await store.update(job_id, "metrics_analysis", 65, "Анализ метрик готов", partial=state)
 
@@ -224,9 +223,6 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
                 "analysis_summary": _truncate(analysis_summary, 3000),
             },
         )
-        hypotheses_raw = convert_numpy_types(hypotheses_raw)
-        if not isinstance(hypotheses_raw, str):
-            hypotheses_raw = str(hypotheses_raw)
         hypotheses = parse_hypotheses(hypotheses_raw)
         state["hypotheses_raw"] = hypotheses_raw
         state["hypotheses"] = hypotheses
@@ -246,11 +242,13 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
                 df_processed,
                 output_dir,
                 graph_count,
+                correlations=correlations,
+                parsed_structure=parsed_structure,
             )
 
-        (plot_files, viz_code, viz_log), _ = await asyncio.gather(
+        (plot_files, viz_code, viz_log, plot_details), _ = await asyncio.gather(
             run_visualization(),
-            _save_reports_parallel(
+            _save_analysis_reports(
                 output_dir,
                 analysis_summary,
                 source_file=job.filename,
@@ -261,11 +259,23 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
 
         state["viz_code"] = viz_code
         state["viz_output"] = viz_log
-        state["code_warnings_viz"] = []
         state["plot_files"] = plot_files
-        await asyncio.to_thread(
-            _save_text, output_dir / "generated_visualization_code.py",
-            f"# Автоматическая визуализация\n\n{viz_code}",
+        state["plot_details"] = plot_details
+        await asyncio.gather(
+            asyncio.to_thread(
+                _save_text,
+                output_dir / "generated_visualization_code.py",
+                f"# Автоматическая визуализация\n\n{viz_code}",
+            ),
+            asyncio.to_thread(
+                ensure_plots_report_docx,
+                output_dir,
+                plot_files,
+                plot_details=plot_details,
+                source_file=job.filename,
+                correlations=correlations,
+                viz_output=viz_log,
+            ),
         )
         await store.update(
             job_id, "viz_generation", 82,
@@ -273,7 +283,7 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
             partial=state,
         )
 
-        await store.update(job_id, "visualization", 86, "Формирование итогового отчёта (Python)")
+        await store.update(job_id, "final_report", 86, "Формирование итогового отчёта (Python)")
 
         final_report = await asyncio.to_thread(
             build_final_report,
@@ -290,14 +300,7 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         state["final_report"] = final_report
         await store.update(job_id, "final_report", 92, "Сохранение отчёта", partial=state)
 
-        await _save_reports_parallel(
-            output_dir,
-            analysis_summary,
-            final_report,
-            source_file=job.filename,
-            hypotheses=hypotheses,
-            hypotheses_raw=hypotheses_raw,
-        )
+        await _save_final_report(output_dir, final_report, source_file=job.filename)
 
         await store.complete(job_id, state)
 

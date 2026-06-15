@@ -24,7 +24,7 @@
 | Метрики | Детерминированный план и расчёт без LLM |
 | Анализ | Текстовая интерпретация метрик (Ollama) |
 | Гипотезы | 5–8 проверяемых гипотез в структурированном виде |
-| Графики | До 30 PNG (matplotlib/seaborn), скачивание по одному или все |
+| Графики | До 30 PNG (matplotlib/seaborn), DOCX-отчёт с пояснениями |
 | Отчёт | Многосекционный итоговый документ |
 | Песочница | Выполнение пользовательского Python-кода на датасете |
 | Настройки | 8 тем оформления, выбор LLM-модели |
@@ -54,8 +54,9 @@
 
 ### Внешние сервисы
 
-- **Ollama** — локальный сервер LLM (по умолчанию `http://localhost:11434`)
+- **Ollama** — локальный сервер LLM (по умолчанию `http://127.0.0.1:11434`)
 - Рекомендуемая модель: `qwen3:8b` (настраивается в UI)
+- **Docker** (опционально) — production-стек UI + API, см. [docker.md](docker.md)
 
 ## Философия пайплайна: Python-first
 
@@ -76,10 +77,10 @@
 ## Структура репозитория
 
 ```
-электронный DS/
+ai-ds/
+├── datasets/                # тестовые CSV/XLSX
 ├── docs/                    # Эта документация
 ├── DOCUMENTATION.md         # Legacy: Streamlit / ins_temp3.py
-├── ins_temp3.py             # Legacy-приложение (Streamlit)
 ├── new/
 │   ├── backend/
 │   │   ├── app/
@@ -89,12 +90,17 @@
 │   │   │   ├── models.py        # Pydantic-схемы
 │   │   │   ├── api/routes.py    # HTTP-маршруты
 │   │   │   └── core/            # Бизнес-логика
+│   │   ├── docker/              # Dockerfile и compose для API
 │   │   ├── data/jobs/           # Файлы задач (runtime)
+│   │   ├── run_dev.py           # Dev-сервер (:8010)
 │   │   └── requirements.txt
-│   └── frontend/
-│       ├── src/
-│       └── package.json
-└── venv/                    # Общее виртуальное окружение (опционально)
+│   ├── frontend/
+│   │   ├── docker/              # Dockerfile, nginx
+│   │   ├── src/
+│   │   └── package.json
+│   ├── docker/                  # Полный стек (UI + API)
+│   └── README.md
+└── old/                       # Legacy Streamlit (ins_temp3.py)
 ```
 
 ## Пользовательский сценарий (кратко)

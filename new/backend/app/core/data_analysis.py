@@ -395,18 +395,86 @@ def format_metrics_results(metrics_results: dict) -> str:
     return json.dumps(convert_numpy_types(metrics_results), ensure_ascii=False, indent=2)
 
 
+_SUMMARY_METRIC_ORDER = (
+    "count", "nunique", "mean", "median", "std", "min", "max",
+    "mode", "mode_count", "mode_rel_freq",
+    "quantile_25", "quantile_75", "quantile_90", "quantile_95",
+    "skew", "kurtosis", "mad", "iqr", "var",
+    "min_date", "max_date", "date_range_days", "unique_dates", "dates_per_month",
+)
+
+
+def _format_metric_value(key: str, value) -> str:
+    if isinstance(value, float):
+        if key == "mode_rel_freq":
+            return f"{key}={value:.1%}"
+        return f"{key}={round(value, 4)}"
+    if isinstance(value, list):
+        if len(value) <= 4:
+            return f"{key}={value}"
+        return f"{key}=[{value[0]}, …, {value[-1]}] ({len(value)} знач.)"
+    return f"{key}={value}"
+
+
+def format_metrics_summary(metrics_results: dict) -> str:
+    """Краткое текстовое представление рассчитанных метрик."""
+    lines: list[str] = []
+
+    for col, metrics in metrics_results.items():
+        if not isinstance(metrics, dict):
+            continue
+
+        parts: list[str] = []
+        seen: set[str] = set()
+        for key in _SUMMARY_METRIC_ORDER:
+            if key not in metrics or metrics[key] is None:
+                continue
+            parts.append(_format_metric_value(key, metrics[key]))
+            seen.add(key)
+
+        for key, value in metrics.items():
+            if key in seen or value is None:
+                continue
+            parts.append(_format_metric_value(key, value))
+
+        if parts:
+            lines.append(f"• {col}: {', '.join(parts)}")
+
+    return "\n".join(lines) if lines else "Метрики не рассчитаны."
+
+
 def format_calculation_code_reference(metrics_plan: dict[str, list[str]]) -> str:
     """Стартовый код для песочницы на вкладке «Код»."""
     cols = len(metrics_plan)
+    first_col = next(iter(metrics_plan), "column")
     return f"""# Песочница Python — данные и план метрик уже загружены на сервере
 # Доступно: df, pd, np, metrics_plan ({cols} столбцов)
-# Функции: compute_metrics(), format_metrics_results()
+# Функции: compute_metrics(), format_metrics_summary(), format_metrics_results()
+
+rows, cols_count = df.shape
+print(f"Датасет: {{rows}} строк × {{cols_count}} столбцов")
+
+missing = df.isna().sum()
+cols_with_na = missing[missing > 0]
+if not cols_with_na.empty:
+    print(f"Столбцов с пропусками: {{len(cols_with_na)}}")
+    for col, cnt in cols_with_na.nlargest(5).items():
+        print(f"  {{col}}: {{cnt}} ({{cnt / rows:.1%}})")
+else:
+    print("Пропусков нет")
+
+print()
+print("=" * 60)
+print("Метрики по плану")
+print("=" * 60)
 
 metrics_results = compute_metrics(df, metrics_plan)
-print(format_metrics_results(metrics_results))
+print(format_metrics_summary(metrics_results))
 
-# Примеры для экспериментов:
-# print(df.head())
-# print(df.describe(include="all"))
-# print(df["{next(iter(metrics_plan), "column")}"].value_counts())
+# Полный JSON (раскомментируйте при необходимости):
+# print(format_metrics_results(metrics_results))
+
+# Дополнительные эксперименты:
+# print(df.describe(include="all").T)
+# print(df["{first_col}"].value_counts().head(10))
 """

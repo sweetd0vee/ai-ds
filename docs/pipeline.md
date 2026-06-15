@@ -93,7 +93,9 @@ flowchart TD
 | Категория ↔ категория | Cramér's *V* |
 | Категория → число | η (eta) |
 
-Сохраняются `quality_report.txt`, `correlations.txt` (текст + JSON-блок после `---JSON---`).
+Сохраняются `quality_report.txt`, `correlations.txt`, `quality_insights.xlsx` (текст + JSON-блок после `---JSON---`).
+
+В `state` также появляется `insights_report_raw` — объединённый текст для вкладки «Качество».
 
 ---
 
@@ -163,11 +165,14 @@ flowchart TD
 
 **Параллельно выполняются:**
 
-1. `generate_visualizations(df, output_dir, graph_count)` — до N PNG:
+1. `generate_visualizations(df, output_dir, graph_count, correlations=..., parsed_structure=...)` — до N PNG:
    - пропуски, heatmap корреляций, гистограммы, boxplot, bar, scatter, time series, violin (по наличию подходящих столбцов).
 2. `_save_reports_parallel` — TXT/DOCX анализа и гипотез.
 
-**Выход:** `plot_files[]`, `viz_code` (описание логики), `generated_visualization_code.py`.
+**Выход:**
+- `plot_files[]`, `plot_details[]` (метаданные каждого графика: тип, столбцы, описание)
+- `viz_code` (описание логики), `generated_visualization_code.py`
+- `plots_report.docx` — DOCX-отчёт с встроенными PNG и пояснениями (`ensure_plots_report_docx`)
 
 ---
 

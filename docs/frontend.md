@@ -142,12 +142,12 @@ flowchart LR
 | Вкладка | Действия |
 |---------|----------|
 | Любая с текстом | Копировать |
-| Качество | TXT качество + связи |
+| Качество | XLSX (`quality_insights.xlsx`) |
 | Анализ | DOCX анализа |
-| Гипотезы | TXT + DOCX гипотез |
+| Гипотезы | DOCX гипотез |
 | Структура | XLSX |
-| Графики | Скачать все PNG |
-| Отчёт | DOCX отчёта |
+| Графики | DOCX-отчёт по графикам (`plots_report.docx`) |
+| Отчёт | DOCX итогового отчёта |
 
 Скачивание DOCX/XLSX — через `downloadJobFile` (fetch + blob), не прямая ссылка.
 
@@ -204,7 +204,7 @@ flowchart LR
 
 | Команда | Действие |
 |---------|----------|
-| `npm run dev` | Vite :5173, proxy `/api` → :8000 |
+| `npm run dev` | Vite :5173, proxy `/api` → :8010 |
 | `npm run build` | Production в `dist/` |
 | `npm run preview` | Просмотр `dist/` |
 

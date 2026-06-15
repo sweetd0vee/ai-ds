@@ -1,11 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { Download, Table2 } from 'lucide-react'
+import { Download, Loader2, Table2 } from 'lucide-react'
 import { useState } from 'react'
 import {
   downloadAllPlots,
   downloadJobFile,
   downloadPlot,
-  downloadUrl,
   plotUrl,
 } from '../../api'
 import { PREVIEW_ROWS, RESULT_SECTIONS } from '../../constants'
@@ -31,68 +30,105 @@ async function downloadArtifact(jobId, filename, errorLabel) {
   }
 }
 
-function ResultsContent({ activeSection, results, jobId, effectiveJobId, onOpenPlot }) {
+const SECTION_DOWNLOADS = [
+  {
+    section: 'insights',
+    filename: 'quality_insights.xlsx',
+    label: 'Качество XLSX',
+    when: (job) => job?.status === 'completed',
+  },
+  {
+    section: 'analysis',
+    filename: 'analysis_summary_report.docx',
+    label: 'Анализ DOCX',
+    when: (_, results) => Boolean(results?.analysis_summary),
+  },
+  {
+    section: 'hypotheses',
+    filename: 'hypotheses_report.docx',
+    label: 'Гипотезы DOCX',
+    when: (_, results) => Boolean(results?.hypotheses?.length || results?.hypotheses_raw),
+  },
+  {
+    section: 'structure',
+    filename: 'data_structure.xlsx',
+    label: 'Структура XLSX',
+    when: (_, results) => Boolean(results?.data_structure?.columns?.length),
+  },
+  {
+    section: 'report',
+    filename: 'final_report.docx',
+    label: 'Отчёт DOCX',
+    when: (job) => job?.status === 'completed',
+  },
+]
+
+function BodyFill({ children }) {
+  return <div className="content-body-fill">{children}</div>
+}
+
+function ResultsContent({ activeSection, results, effectiveJobId, onOpenPlot }) {
   switch (activeSection) {
     case 'preview':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           {results?.shape && (
             <p className="preview-meta">
               {results.shape[0]} строк × {results.shape[1]} столбцов · первые {PREVIEW_ROWS} записей
             </p>
           )}
           <PreviewTable preview={results?.preview} columns={results?.columns} />
-        </div>
+        </BodyFill>
       )
     case 'structure':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           <StructureView results={results} />
-        </div>
+        </BodyFill>
       )
     case 'insights':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           <InsightsView results={results} />
-        </div>
+        </BodyFill>
       )
     case 'metrics_plan':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           <MetricsPlanView results={results} />
-        </div>
+        </BodyFill>
       )
     case 'calculation_code':
       return (
-        <div className="content-body-fill">
-          <CodeSandbox jobId={jobId} defaultCode={results?.calculation_code} />
-        </div>
+        <BodyFill>
+          <CodeSandbox jobId={effectiveJobId} defaultCode={results?.calculation_code} />
+        </BodyFill>
       )
     case 'metrics':
       return <pre className="code-view">{results?.metrics_results_raw || 'Ожидание…'}</pre>
     case 'analysis':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           <AnalysisView text={results?.analysis_summary} />
-        </div>
+        </BodyFill>
       )
     case 'hypotheses':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           <HypothesesView results={results} />
-        </div>
+        </BodyFill>
       )
     case 'viz_code':
       return <pre className="code-view">{results?.viz_code || 'Ожидание…'}</pre>
     case 'report':
       return (
-        <div className="content-body-fill">
+        <BodyFill>
           <ReportView text={results?.final_report} />
-        </div>
+        </BodyFill>
       )
     case 'plots':
       return (
-        <div className="content-body-fill">
+        <div className="content-body-fill content-body-fill--scroll">
           <PlotsGallery
             jobId={effectiveJobId}
             plotFiles={results?.plot_files}
@@ -108,16 +144,20 @@ function ResultsContent({ activeSection, results, jobId, effectiveJobId, onOpenP
 export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
   const results = job?.results
   const [lightbox, setLightbox] = useState(null)
+  const [plotsDownloading, setPlotsDownloading] = useState(false)
   const effectiveJobId = jobId || job?.job_id || job?.id
   const plotFiles = results?.plot_files || []
   const textContent = sectionTextContent(activeSection, results)
 
   const handleDownloadAllPlots = async () => {
-    if (!effectiveJobId || !plotFiles.length) return
+    if (!effectiveJobId || !plotFiles.length || plotsDownloading) return
+    setPlotsDownloading(true)
     try {
-      await downloadAllPlots(effectiveJobId, plotFiles)
-    } catch {
-      /* ignore */
+      await downloadAllPlots(effectiveJobId)
+    } catch (e) {
+      window.alert(e.message || 'Не удалось скачать отчёт по графикам')
+    } finally {
+      setPlotsDownloading(false)
     }
   }
 
@@ -153,81 +193,30 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
           <div className="content-toolbar">
             {textContent && <CopyButton text={textContent} />}
 
-            {activeSection === 'insights' && job?.status === 'completed' && (
-              <>
-                <a className="download-btn" href={downloadUrl(effectiveJobId, 'quality_report.txt')} download>
-                  <Download size={14} />
-                  Качество TXT
-                </a>
-                <a className="download-btn" href={downloadUrl(effectiveJobId, 'correlations.txt')} download>
-                  <Download size={14} />
-                  Связи TXT
-                </a>
-              </>
-            )}
-
-            {activeSection === 'analysis' && results?.analysis_summary && (
+            {SECTION_DOWNLOADS.filter(
+              (item) => item.section === activeSection && item.when(job, results),
+            ).map((item) => (
               <button
+                key={item.filename}
                 type="button"
                 className="download-btn"
-                onClick={() => downloadArtifact(effectiveJobId, 'analysis_summary_report.docx', 'Не удалось скачать анализ')}
+                onClick={() => downloadArtifact(effectiveJobId, item.filename, `Не удалось скачать: ${item.label}`)}
                 disabled={!effectiveJobId}
               >
                 <Download size={14} />
-                Анализ DOCX
+                {item.label}
               </button>
-            )}
-
-            {activeSection === 'hypotheses' && (results?.hypotheses?.length || results?.hypotheses_raw) && (
-              <>
-                <a
-                  className="download-btn"
-                  href={downloadUrl(effectiveJobId, 'hypotheses_report.txt')}
-                  download
-                >
-                  <Download size={14} />
-                  Гипотезы TXT
-                </a>
-                <button
-                  type="button"
-                  className="download-btn"
-                  onClick={() => downloadArtifact(effectiveJobId, 'hypotheses_report.docx', 'Не удалось скачать гипотезы')}
-                  disabled={!effectiveJobId}
-                >
-                  <Download size={14} />
-                  Гипотезы DOCX
-                </button>
-              </>
-            )}
-
-            {activeSection === 'structure' && results?.data_structure?.columns?.length > 0 && (
-              <button
-                type="button"
-                className="download-btn"
-                onClick={() => downloadArtifact(effectiveJobId, 'data_structure.xlsx', 'Не удалось скачать структуру')}
-                disabled={!effectiveJobId}
-              >
-                <Download size={14} />
-                Структура XLSX
-              </button>
-            )}
+            ))}
 
             {activeSection === 'plots' && plotFiles.length > 0 && (
-              <button type="button" className="download-btn" onClick={handleDownloadAllPlots}>
-                <Download size={14} />
-                Скачать все графики
-              </button>
-            )}
-
-            {activeSection === 'report' && job?.status === 'completed' && (
               <button
                 type="button"
                 className="download-btn"
-                onClick={() => downloadArtifact(effectiveJobId, 'final_report.docx', 'Не удалось скачать отчёт')}
-                disabled={!effectiveJobId}
+                onClick={handleDownloadAllPlots}
+                disabled={plotsDownloading || !effectiveJobId}
               >
-                <Download size={14} />
-                Отчёт DOCX
+                {plotsDownloading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                {plotsDownloading ? 'Формирование…' : 'Отчёт по графикам DOCX'}
               </button>
             )}
           </div>
@@ -244,7 +233,6 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
               <ResultsContent
                 activeSection={activeSection}
                 results={results}
-                jobId={jobId}
                 effectiveJobId={effectiveJobId}
                 onOpenPlot={setLightbox}
               />

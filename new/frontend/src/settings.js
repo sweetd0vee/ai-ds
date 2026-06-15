@@ -15,7 +15,7 @@ export const THEMES = [
 
 const DEFAULT_ANALYST_MODEL = 'qwen3:8b'
 
-export const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS = {
   theme: 'light',
   analystModel: DEFAULT_ANALYST_MODEL,
 }

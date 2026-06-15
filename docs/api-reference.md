@@ -2,7 +2,7 @@
 
 Базовый URL: `/api`  
 Префикс роутера: `app/api/routes.py`  
-Интерактивная документация: http://localhost:8000/docs
+Интерактивная документация: http://localhost:8010/docs (dev) или http://localhost:8020/docs (Docker)
 
 ## Общие соглашения
 
@@ -150,7 +150,9 @@ data: {"job_id":"...","status":"running","step":"metrics_plan",...}
 | `hypotheses_report.txt` / `.docx` | Гипотезы |
 | `quality_report.txt` | Качество данных |
 | `correlations.txt` | Корреляции |
+| `quality_insights.xlsx` | Качество и связи (XLSX) |
 | `data_structure.xlsx` | Структура столбцов |
+| `plots_report.docx` | DOCX-отчёт с графиками и пояснениями |
 | `generated_calculation_code.py` | Справочный код метрик |
 | `generated_visualization_code.py` | Описание визуализации |
 
@@ -159,8 +161,10 @@ data: {"job_id":"...","status":"running","step":"metrics_plan",...}
 Если DOCX/XLSX отсутствует (старые задачи), сервер пересобирает:
 
 - `data_structure.xlsx` ← `build_structure_xlsx`
+- `quality_insights.xlsx` ← `build_quality_xlsx`
 - `analysis_summary_report.docx` ← `build_analysis_docx`
 - `hypotheses_report.docx` ← `build_hypotheses_docx`
+- `plots_report.docx` ← `ensure_plots_report_docx`
 - `final_report.docx` ← `build_report_docx`
 
 ---
@@ -169,14 +173,14 @@ data: {"job_id":"...","status":"running","step":"metrics_plan",...}
 
 ```bash
 # 1. Запуск
-curl -X POST http://localhost:8000/api/analyze \
+curl -X POST http://localhost:8010/api/analyze \
   -F "file=@data.csv" \
   -F "graph_count=20" \
   -F "analyst_model=qwen3:8b"
 
 # 2. Статус
-curl http://localhost:8000/api/jobs/{job_id}
+curl http://localhost:8010/api/jobs/{job_id}
 
 # 3. Скачать отчёт
-curl -O http://localhost:8000/api/jobs/{job_id}/download/final_report.docx
+curl -O http://localhost:8010/api/jobs/{job_id}/download/final_report.docx
 ```

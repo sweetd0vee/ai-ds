@@ -11,8 +11,11 @@ function triggerBlobDownload(blob, filename) {
   const link = document.createElement('a')
   link.href = url
   link.download = filename
+  link.style.display = 'none'
+  document.body.appendChild(link)
   link.click()
-  URL.revokeObjectURL(url)
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export async function fetchConfig() {
@@ -80,15 +83,12 @@ export async function downloadPlot(jobId, filename) {
   triggerBlobDownload(await res.blob(), filename)
 }
 
-export async function downloadAllPlots(jobId, filenames) {
-  for (const name of filenames) {
-    await downloadPlot(jobId, name)
-    await new Promise((r) => setTimeout(r, 200))
-  }
+function downloadUrl(jobId, filename) {
+  return `${API_BASE}/jobs/${jobId}/download/${filename}`
 }
 
-export function downloadUrl(jobId, filename) {
-  return `${API_BASE}/jobs/${jobId}/download/${filename}`
+export async function downloadAllPlots(jobId) {
+  await downloadJobFile(jobId, 'plots_report.docx')
 }
 
 export async function downloadJobFile(jobId, filename) {

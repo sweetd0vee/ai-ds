@@ -1,0 +1,14 @@
+venv/
+vendor/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/jobs/
+data/test_export/
+docker/
+*.md
+.git/
+.gitignore

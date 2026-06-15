@@ -22,6 +22,8 @@ export function sectionTextContent(sectionId, results) {
   if (!results) return null
 
   if (sectionId === 'insights') {
+    const combined = results.insights_report_raw
+    if (combined) return combined
     const { quality_report_raw: quality, correlations_raw: correlations } = results
     if (quality && correlations) return `${quality}\n\n${correlations}`
     return quality || correlations || null

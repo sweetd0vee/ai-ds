@@ -1,10 +1,11 @@
-"""Автоматическая визуализация без LLM."""
+"""Автоматическая визуализация без LLM — приоритет информативным графикам."""
 
 from __future__ import annotations
 
 import logging
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -20,14 +21,32 @@ import pandas as pd
 import seaborn as sns
 
 from .data_analysis import classify_column
+from .plot_insights import build_plot_detail
 
 logger = logging.getLogger(__name__)
 
 sns.set_theme(style="whitegrid", palette="tab10")
 plt.rcParams.update({"figure.figsize": (10, 6), "figure.dpi": 100, "savefig.dpi": 100})
 
+BUSINESS_KEYWORDS = (
+    "revenue", "profit", "margin", "price", "cost", "sales", "amount",
+    "quantity", "score", "rating", "nps", "total", "sum", "avg", "mean",
+    "доход", "выруч", "прибыл", "марж", "цена", "сумм", "колич", "оценк",
+)
 
-def _column_groups(df: pd.DataFrame) -> dict[str, list[str]]:
+SKIP_NAME_HINTS = (
+    "id", "index", "idx", "key", "sku", "uuid", "hash", "код", "номер",
+)
+
+
+@dataclass
+class PlotCandidate:
+    score: float
+    label: str
+    plot_fn: Callable[[], str | None]
+
+
+def _column_groups(df: pd.DataFrame, parsed_structure: dict | None = None) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {
         "numeric": [],
         "categorical": [],
@@ -36,10 +55,65 @@ def _column_groups(df: pd.DataFrame) -> dict[str, list[str]]:
         "identifier": [],
         "textual": [],
     }
+    kind_map = {}
+    if parsed_structure:
+        for item in parsed_structure.get("columns", []):
+            if item.get("name"):
+                kind_map[item["name"]] = item.get("kind")
+
     for col in df.columns:
-        kind = classify_column(df, col)
+        kind = kind_map.get(col) or classify_column(df, col)
         groups.get(kind, groups["categorical"]).append(col)
     return groups
+
+
+def _is_low_value_column(name: str, series: pd.Series, kind: str) -> bool:
+    lower = name.lower()
+    if any(h in lower for h in SKIP_NAME_HINTS):
+        return True
+    if kind == "identifier":
+        return True
+    non_null = max(int(series.notna().sum()), 1)
+    nunique = series.nunique(dropna=True)
+    if nunique <= 1:
+        return True
+    if kind in ("categorical", "boolean") and nunique > 25:
+        return True
+    if kind == "numeric":
+        nums = pd.to_numeric(series, errors="coerce").dropna()
+        if nums.empty:
+            return True
+        if nunique >= 0.95 * non_null:
+            return True
+    return False
+
+
+def _column_importance(name: str, series: pd.Series, kind: str) -> float:
+    if _is_low_value_column(name, series, kind):
+        return 0.0
+    score = 10.0
+    lower = name.lower()
+    if any(k in lower for k in BUSINESS_KEYWORDS):
+        score += 35.0
+    non_null = max(int(series.notna().sum()), 1)
+    nunique = series.nunique(dropna=True)
+    if kind in ("categorical", "boolean"):
+        if 2 <= nunique <= 12:
+            score += 20.0
+        elif nunique <= 20:
+            score += 10.0
+    if kind == "numeric":
+        nums = pd.to_numeric(series, errors="coerce").dropna()
+        if len(nums) > 1:
+            mean = abs(float(nums.mean()))
+            std = float(nums.std())
+            if mean > 1e-9:
+                score += min(25.0, (std / mean) * 15.0)
+            elif std > 0:
+                score += 10.0
+    if kind == "datetime":
+        score += 15.0
+    return score
 
 
 def _safe_filename(*parts: str) -> str:
@@ -66,198 +140,319 @@ def _try_plot(fn: Callable[[], str | None]) -> str | None:
         return None
 
 
-def generate_visualizations(
+def _rank_columns(df: pd.DataFrame, cols: list[str], kind: str) -> list[str]:
+    scored = [
+        (col, _column_importance(col, df[col], kind))
+        for col in cols
+        if col in df.columns and not _is_low_value_column(col, df[col], kind)
+    ]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [col for col, s in scored if s > 0]
+
+
+def _collect_candidates(
     df: pd.DataFrame,
     output_dir: Path,
-    graph_count: int,
-) -> tuple[list[str], str, str]:
-    """Возвращает (список png, справочный код, лог выполнения)."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    groups = _column_groups(df)
-    numeric = groups["numeric"]
-    categorical = groups["categorical"] + groups["boolean"]
-    datetime_cols = groups["datetime"]
-    plot_files: list[str] = []
-    actions: list[str] = []
+    groups: dict[str, list[str]],
+    correlations: dict | None,
+) -> list[PlotCandidate]:
+    candidates: list[PlotCandidate] = []
+    numeric = _rank_columns(df, groups["numeric"], "numeric")
+    categorical = _rank_columns(df, groups["categorical"] + groups["boolean"], "categorical")
+    datetime_cols = _rank_columns(df, groups["datetime"], "datetime")
+    corr = correlations or {}
 
-    def add(fn: Callable[[], str | None], label: str) -> bool:
-        if len(plot_files) >= graph_count:
-            return False
-        name = _try_plot(fn)
-        if name:
-            plot_files.append(name)
-            actions.append(label)
-        return len(plot_files) < graph_count
+    # 1. Тепловая карта корреляций (компактная, только осмысленные числовые)
+    heatmap_cols = [c for c in corr.get("numeric_columns", numeric) if c in numeric][:12]
+    if len(heatmap_cols) >= 3:
 
-    # 1. Пропуски
-    if len(df.columns) > 0:
-        def missing_plot():
-            miss = df.isna().sum()
-            miss = miss[miss > 0].sort_values(ascending=False).head(20)
-            if miss.empty:
+        def corr_heatmap(cols=heatmap_cols):
+            sub = df[cols].apply(pd.to_numeric, errors="coerce")
+            corr_mat = sub.corr()
+            if corr_mat.shape[0] < 3:
                 return None
-            fig, ax = plt.subplots()
-            miss.plot(kind="bar", ax=ax, color=sns.color_palette("tab10", len(miss)))
-            ax.set_title("Пропущенные значения по столбцам")
-            ax.set_ylabel("Количество")
-            ax.tick_params(axis="x", rotation=45)
-            return _save_fig(output_dir, _safe_filename("missing_values", "bar"))
-
-        add(missing_plot, "missing_values bar")
-
-    # 2. Корреляции
-    if len(numeric) >= 2:
-        def corr_plot():
-            corr = df[numeric].select_dtypes(include=[np.number]).corr()
-            if corr.shape[0] < 2:
-                return None
-            fig, ax = plt.subplots(figsize=(max(8, len(numeric)), max(6, len(numeric))))
-            sns.heatmap(corr, annot=len(numeric) <= 8, fmt=".2f", cmap="viridis", ax=ax)
-            ax.set_title("Корреляция числовых признаков")
+            fig, ax = plt.subplots(figsize=(max(8, len(cols) * 0.7), max(6, len(cols) * 0.6)))
+            annot = len(cols) <= 10
+            sns.heatmap(corr_mat, annot=annot, fmt=".2f", cmap="RdBu_r", center=0, ax=ax, vmin=-1, vmax=1)
+            ax.set_title("Корреляции ключевых числовых признаков")
             return _save_fig(output_dir, _safe_filename("corr", "heatmap"))
 
-        add(corr_plot, "correlation heatmap")
+        candidates.append(PlotCandidate(98.0, "correlation heatmap", corr_heatmap))
 
-    # 3. Гистограммы числовых
-    for col in numeric:
-        if len(plot_files) >= graph_count:
+    # 2. Scatter + тренд для самых сильных числовых пар (не более 3)
+    scatter_count = 0
+    used_scatter_cols: set[str] = set()
+    for pair in corr.get("numeric_pairs", [])[:12]:
+        if scatter_count >= 3:
             break
+        col_a, col_b = pair.get("col_a"), pair.get("col_b")
+        pearson = abs(pair.get("pearson") or 0)
+        if not col_a or not col_b or col_a not in df.columns or col_b not in df.columns:
+            continue
+        if pearson < 0.35:
+            continue
+        if col_a in used_scatter_cols and col_b in used_scatter_cols:
+            continue
+        scatter_count += 1
+        used_scatter_cols.update([col_a, col_b])
+        score = 70.0 + min(28.0, pearson * 35.0)
 
-        def hist_plot(c=col):
-            series = pd.to_numeric(df[c], errors="coerce").dropna()
-            if series.empty:
+        def scatter_pair(a=col_a, b=col_b, r=pair.get("pearson")):
+            sub = df[[a, b]].apply(pd.to_numeric, errors="coerce").dropna()
+            if len(sub) < 5:
                 return None
             fig, ax = plt.subplots()
-            ax.hist(series, bins=min(30, max(10, series.nunique() // 2)), color="steelblue", edgecolor="white")
+            sns.regplot(data=sub, x=a, y=b, ax=ax, scatter_kws={"alpha": 0.5, "s": 35}, line_kws={"color": "crimson"})
+            ax.set_title(f"{b} vs {a} (r={r:.2f})")
+            return _save_fig(output_dir, _safe_filename(a, b, "scatter"))
+
+        candidates.append(PlotCandidate(score, f"scatter {col_a} vs {col_b}", scatter_pair))
+
+    # 3. Среднее/сумма числового по категории (eta из анализа связей, не более 4)
+    cat_num_count = 0
+    for link in corr.get("categorical_numeric", [])[:12]:
+        if cat_num_count >= 4:
+            break
+        cat_col, num_col = link.get("categorical"), link.get("numeric")
+        eta = link.get("eta") or 0
+        if not cat_col or not num_col:
+            continue
+        if cat_col not in df.columns or num_col not in df.columns:
+            continue
+        if eta < 0.15:
+            continue
+        score = 75.0 + min(22.0, eta * 40.0)
+
+        def bar_cat_num(c=cat_col, n=num_col, e=eta):
+            sub = df[[c, n]].copy()
+            sub[n] = pd.to_numeric(sub[n], errors="coerce")
+            sub = sub.dropna()
+            if sub.empty:
+                return None
+            top_cats = sub[c].astype(str).value_counts().head(10).index
+            sub = sub[sub[c].astype(str).isin(top_cats)]
+            agg = sub.groupby(sub[c].astype(str), observed=True)[n].mean().sort_values(ascending=False)
+            if agg.empty:
+                return None
+            fig, ax = plt.subplots(figsize=(11, 5))
+            colors = sns.color_palette("tab10", len(agg))
+            agg.plot(kind="bar", ax=ax, color=colors)
+            ax.set_title(f"Среднее {n} по {c} (η={e:.2f})")
+            ax.set_xlabel(c)
+            ax.set_ylabel(f"Среднее {n}")
+            ax.tick_params(axis="x", rotation=45)
+            return _save_fig(output_dir, _safe_filename(n, c, "mean_bar"))
+
+        candidates.append(PlotCandidate(score, f"mean {num_col} by {cat_col}", bar_cat_num))
+        cat_num_count += 1
+
+    # 4. Boxplot: числовой по категории (для топ-пар, если bar ещё не покрыл)
+    seen_pairs: set[tuple[str, str]] = set()
+    for link in corr.get("categorical_numeric", [])[:6]:
+        cat_col, num_col = link.get("categorical"), link.get("numeric")
+        if not cat_col or not num_col:
+            continue
+        key = (cat_col, num_col)
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        eta = link.get("eta") or 0
+        if eta < 0.2:
+            continue
+        score = 68.0 + min(20.0, eta * 30.0)
+
+        def box_cat_num(c=cat_col, n=num_col, e=eta):
+            sub = df[[c, n]].copy()
+            sub[n] = pd.to_numeric(sub[n], errors="coerce")
+            sub = sub.dropna()
+            top_cats = sub[c].astype(str).value_counts().head(8).index
+            sub = sub[sub[c].astype(str).isin(top_cats)]
+            if sub[c].astype(str).nunique() < 2:
+                return None
+            fig, ax = plt.subplots(figsize=(11, 5))
+            sns.boxplot(data=sub, x=c, y=n, ax=ax, palette="Set2")
+            ax.set_title(f"Распределение {n} по {c}")
+            ax.tick_params(axis="x", rotation=45)
+            return _save_fig(output_dir, _safe_filename(n, c, "box"))
+
+        candidates.append(PlotCandidate(score - 5, f"box {num_col} by {cat_col}", box_cat_num))
+
+    # 5. Временной ряд: агрегат важной метрики по дате
+    if datetime_cols and numeric:
+        date_col = datetime_cols[0]
+        metric_col = numeric[0]
+        score = 72.0 + _column_importance(metric_col, df[metric_col], "numeric") * 0.2
+
+        def ts_metric(d=date_col, m=metric_col):
+            sub = df[[d, m]].copy()
+            sub[d] = pd.to_datetime(sub[d], errors="coerce")
+            sub[m] = pd.to_numeric(sub[m], errors="coerce")
+            sub = sub.dropna().sort_values(d)
+            if len(sub) < 4:
+                return None
+            freq = "W" if sub[d].nunique() > 60 else "ME"
+            rolled = sub.set_index(d)[m].resample(freq).mean()
+            if rolled.dropna().empty:
+                return None
+            fig, ax = plt.subplots()
+            rolled.plot(ax=ax, marker="o", color="teal", linewidth=2)
+            ax.set_title(f"Динамика среднего {m} по периодам")
+            ax.set_xlabel("Период")
+            ax.set_ylabel(m)
+            ax.tick_params(axis="x", rotation=45)
+            return _save_fig(output_dir, _safe_filename(m, d, "timeseries"))
+
+        candidates.append(PlotCandidate(score, f"timeseries {metric_col}", ts_metric))
+
+    # 6. Частоты категорий (только информативные, низкая кардинальность)
+    for col in categorical[:4]:
+        nunique = df[col].nunique(dropna=True)
+        if nunique < 2 or nunique > 15:
+            continue
+        score = 55.0 + _column_importance(col, df[col], "categorical") * 0.5
+
+        def cat_count(c=col):
+            vc = df[c].astype(str).value_counts().head(12)
+            if len(vc) < 2:
+                return None
+            fig, ax = plt.subplots(figsize=(10, max(4, len(vc) * 0.4)))
+            colors = sns.color_palette("tab10", len(vc))
+            vc.sort_values().plot(kind="barh", ax=ax, color=colors)
+            ax.set_title(f"Распределение категорий: {c}")
+            ax.set_xlabel("Количество")
+            return _save_fig(output_dir, _safe_filename(c, "count"))
+
+        candidates.append(PlotCandidate(score, f"count {col}", cat_count))
+
+    # 7. Гистограмма — только для топ-2 числовых с вариативностью
+    for col in numeric[:2]:
+        score = 48.0 + _column_importance(col, df[col], "numeric") * 0.4
+
+        def hist_num(c=col):
+            series = pd.to_numeric(df[c], errors="coerce").dropna()
+            if len(series) < 5 or series.nunique() < 3:
+                return None
+            fig, ax = plt.subplots()
+            sns.histplot(series, bins=min(25, max(8, series.nunique() // 3)), kde=True, ax=ax, color="steelblue")
             ax.set_title(f"Распределение: {c}")
             ax.set_xlabel(c)
             return _save_fig(output_dir, _safe_filename(c, "hist"))
 
-        add(hist_plot, f"{col} histogram")
+        candidates.append(PlotCandidate(score, f"hist {col}", hist_num))
 
-    # 4. Boxplot числовых
-    for col in numeric:
-        if len(plot_files) >= graph_count:
-            break
+    # 8. Пропуски — только если есть заметные дыры
+    miss = df.isna().sum()
+    miss = miss[miss > 0]
+    if not miss.empty and miss.max() >= max(3, 0.03 * len(df)):
 
-        def box_plot(c=col):
-            series = pd.to_numeric(df[c], errors="coerce").dropna()
-            if series.empty:
-                return None
-            fig, ax = plt.subplots()
-            sns.boxplot(y=series, ax=ax, color="coral")
-            ax.set_title(f"Boxplot: {c}")
-            return _save_fig(output_dir, _safe_filename(c, "boxplot"))
+        def missing_plot():
+            top = miss.sort_values(ascending=False).head(15)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            colors = sns.color_palette("Oranges_r", len(top))
+            top.plot(kind="bar", ax=ax, color=colors)
+            ax.set_title("Пропущенные значения по столбцам")
+            ax.set_ylabel("Количество")
+            ax.tick_params(axis="x", rotation=45)
+            return _save_fig(output_dir, _safe_filename("missing", "bar"))
 
-        add(box_plot, f"{col} boxplot")
+        candidates.append(PlotCandidate(45.0, "missing values", missing_plot))
 
-    # 5. Категориальные — частоты
-    for col in categorical:
-        if len(plot_files) >= graph_count:
-            break
+    # 9. Crosstab двух категорий (если есть связь)
+    for pair in corr.get("categorical_pairs", [])[:3]:
+        col_a, col_b = pair.get("col_a"), pair.get("col_b")
+        v = pair.get("cramers_v") or 0
+        if not col_a or not col_b or v < 0.2:
+            continue
+        score = 60.0 + min(18.0, v * 30.0)
 
-        def cat_plot(c=col):
-            vc = df[c].astype(str).value_counts().head(15)
-            if vc.empty:
-                return None
-            fig, ax = plt.subplots(figsize=(10, max(4, len(vc) * 0.35)))
-            colors = sns.color_palette("tab10", len(vc))
-            vc.plot(kind="barh", ax=ax, color=colors)
-            ax.set_title(f"Топ категорий: {c}")
-            ax.invert_yaxis()
-            return _save_fig(output_dir, _safe_filename(c, "count"))
-
-        add(cat_plot, f"{col} count")
-
-    # 6. Числовой vs категориальный
-    if numeric and categorical:
-        num_col, cat_col = numeric[0], categorical[0]
-
-        def group_box():
-            sub = df[[cat_col, num_col]].copy()
-            sub[num_col] = pd.to_numeric(sub[num_col], errors="coerce")
-            sub = sub.dropna()
+        def crosstab_plot(a=col_a, b=col_b, cv=v):
+            sub = df[[a, b]].dropna()
             if sub.empty:
                 return None
-            top_cats = sub[cat_col].astype(str).value_counts().head(10).index
-            sub = sub[sub[cat_col].astype(str).isin(top_cats)]
-            fig, ax = plt.subplots(figsize=(12, 6))
-            sns.boxplot(data=sub, x=cat_col, y=num_col, ax=ax, palette="tab10")
-            ax.set_title(f"{num_col} по {cat_col}")
-            ax.tick_params(axis="x", rotation=45)
-            return _save_fig(output_dir, _safe_filename(num_col, cat_col, "box"))
-
-        add(group_box, f"{num_col} by {cat_col} boxplot")
-
-    # 7. Scatter двух числовых
-    if len(numeric) >= 2:
-        x_col, y_col = numeric[0], numeric[1]
-
-        def scatter_plot():
-            sub = df[[x_col, y_col]].apply(pd.to_numeric, errors="coerce").dropna()
-            if len(sub) < 2:
+            top_a = sub[a].astype(str).value_counts().head(6).index
+            top_b = sub[b].astype(str).value_counts().head(6).index
+            sub = sub[sub[a].astype(str).isin(top_a) & sub[b].astype(str).isin(top_b)]
+            ct = pd.crosstab(sub[a].astype(str), sub[b].astype(str))
+            if ct.size < 4:
                 return None
-            fig, ax = plt.subplots()
-            ax.scatter(sub[x_col], sub[y_col], alpha=0.5, c=range(len(sub)), cmap="viridis")
-            ax.set_xlabel(x_col)
-            ax.set_ylabel(y_col)
-            ax.set_title(f"Scatter: {x_col} vs {y_col}")
-            return _save_fig(output_dir, _safe_filename(x_col, y_col, "scatter"))
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.heatmap(ct, annot=True, fmt="d", cmap="YlGnBu", ax=ax)
+            ax.set_title(f"Совместное распределение {a} × {b}")
+            return _save_fig(output_dir, _safe_filename(a, b, "crosstab"))
 
-        add(scatter_plot, f"scatter {x_col} {y_col}")
+        candidates.append(PlotCandidate(score, f"crosstab {col_a} x {col_b}", crosstab_plot))
 
-    # 8. Временные ряды
-    for col in datetime_cols:
+    return candidates
+
+
+def generate_visualizations(
+    df: pd.DataFrame,
+    output_dir: Path,
+    graph_count: int,
+    *,
+    correlations: dict | None = None,
+    parsed_structure: dict | None = None,
+) -> tuple[list[str], str, str, list[dict]]:
+    """Возвращает (список png, справочный код, лог выполнения, метаданные графиков)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    groups = _column_groups(df, parsed_structure)
+
+    if correlations is None:
+        from .data_insights import compute_correlations
+        correlations = compute_correlations(df, parsed_structure)
+
+    candidates = _collect_candidates(df, output_dir, groups, correlations)
+    candidates.sort(key=lambda c: c.score, reverse=True)
+
+    plot_files: list[str] = []
+    plot_details: list[dict] = []
+    actions: list[str] = []
+    used_labels: set[str] = set()
+
+    for cand in candidates:
         if len(plot_files) >= graph_count:
             break
-
-        def ts_plot(c=col):
-            ts = pd.to_datetime(df[c], errors="coerce").dropna()
-            if len(ts) < 3:
-                return None
-            counts = ts.dt.to_period("M").value_counts().sort_index()
-            fig, ax = plt.subplots()
-            counts.plot(kind="bar", ax=ax, color="teal")
-            ax.set_title(f"Записи по месяцам: {c}")
-            ax.tick_params(axis="x", rotation=45)
-            return _save_fig(output_dir, _safe_filename(c, "timeseries"))
-
-        add(ts_plot, f"{col} timeseries")
-
-    # 9. Violin для оставшихся слотов
-    if numeric and categorical and len(plot_files) < graph_count:
-        num_col, cat_col = numeric[0], categorical[0]
-
-        def violin_plot():
-            sub = df[[cat_col, num_col]].copy()
-            sub[num_col] = pd.to_numeric(sub[num_col], errors="coerce")
-            sub = sub.dropna()
-            top_cats = sub[cat_col].astype(str).value_counts().head(8).index
-            sub = sub[sub[cat_col].astype(str).isin(top_cats)]
-            if sub.empty:
-                return None
-            fig, ax = plt.subplots(figsize=(12, 6))
-            sns.violinplot(data=sub, x=cat_col, y=num_col, ax=ax, palette="tab10")
-            ax.set_title(f"Violin: {num_col} по {cat_col}")
-            ax.tick_params(axis="x", rotation=45)
-            return _save_fig(output_dir, _safe_filename(num_col, cat_col, "violin"))
-
-        add(violin_plot, f"violin {num_col} {cat_col}")
+        if cand.label in used_labels:
+            continue
+        name = _try_plot(cand.plot_fn)
+        if name:
+            plot_files.append(name)
+            plot_details.append(
+                build_plot_detail(
+                    name,
+                    label=cand.label,
+                    df=df,
+                    correlations=correlations,
+                )
+            )
+            actions.append(f"{cand.label} (score={cand.score:.0f})")
+            used_labels.add(cand.label)
 
     plot_files = sorted(set(plot_files))[:graph_count]
+    details_by_name = {item["filename"]: item for item in plot_details}
+    plot_details = [details_by_name[name] for name in plot_files if name in details_by_name]
     code_ref = format_viz_code_reference(plot_files, graph_count)
-    log = f"Построено графиков: {len(plot_files)} из {graph_count}\n" + "\n".join(f"- {a}" for a in actions)
-    return plot_files, code_ref, log
+    log = (
+        f"Построено графиков: {len(plot_files)} из {graph_count}\n"
+        f"Стратегия: приоритет связям и бизнес-метрикам\n"
+        + "\n".join(f"- {a}" for a in actions)
+    )
+    return plot_files, code_ref, log, plot_details
 
 
 def format_viz_code_reference(plot_files: list[str], graph_count: int) -> str:
     lines = [
         "# Автоматическая визуализация (app/core/visualization.py, без LLM)",
         f"# Запрошено графиков: {graph_count}, построено: {len(plot_files)}",
+        "# Приоритет: корреляции, связи категория×число, временные ряды, затем распределения",
         "",
         "from app.core.visualization import generate_visualizations",
         "",
-        "plot_files, viz_code, log = generate_visualizations(df, output_dir, graph_count)",
+        "plot_files, viz_code, log, plot_details = generate_visualizations(",
+        "    df, output_dir, graph_count,",
+        "    correlations=correlations,",
+        "    parsed_structure=parsed_structure,",
+        ")",
         "print(log)",
         "",
         "# Созданные файлы:",

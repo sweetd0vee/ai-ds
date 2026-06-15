@@ -9,11 +9,8 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
 
+from .analysis_export import ACCENT, BODY, MUTED, _set_run_font
 from .hypotheses import format_hypotheses_text
-
-ACCENT = RGBColor(0x1D, 0x4E, 0xD8)
-MUTED = RGBColor(0x6B, 0x72, 0x80)
-BODY = RGBColor(0x1F, 0x29, 0x37)
 
 _PRIORITY_COLORS = {
     "high": RGBColor(0xB9, 0x1C, 0x1C),

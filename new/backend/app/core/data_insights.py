@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import json
-import logging
 
 import numpy as np
 import pandas as pd
 
 from .data_analysis import classify_column
 from .utils import convert_numpy_types
-
-logger = logging.getLogger(__name__)
 
 TOP_NUMERIC_PAIRS = 15
 TOP_CATEGORICAL_PAIRS = 10
@@ -41,6 +38,41 @@ def _strength_label(value: float, *, strong: float = 0.7, moderate: float = 0.4)
     if abs_v >= 0.2:
         return "слабая"
     return "очень слабая"
+
+
+def _is_notable_strength(strength: str) -> bool:
+    return strength in ("сильная", "умеренная")
+
+
+CORRELATION_HELP = {
+    "pearson": {
+        "name": "Коэффициент Пирсона (r)",
+        "range": "от −1 до +1",
+        "meaning": (
+            "Линейная связь двух числовых столбцов. +1 — рост одного сопровождается ростом другого, "
+            "−1 — рост одного сопровождается падением другого, 0 — линейной связи нет."
+        ),
+        "thresholds": "Сильная: |r| ≥ 0.7. Умеренная: 0.4 ≤ |r| < 0.7. Слабые связи скрыты.",
+    },
+    "cramers_v": {
+        "name": "Cramér's V",
+        "range": "от 0 до 1",
+        "meaning": (
+            "Сила связи между двумя категориальными столбцами. Чем выше V, тем предсказуемее "
+            "значения одного столбца по другому (например, регион и канал продаж)."
+        ),
+        "thresholds": "Сильная: V ≥ 0.5. Умеренная: 0.3 ≤ V < 0.5. Слабые связи скрыты.",
+    },
+    "eta": {
+        "name": "Корреляционное отношение (η)",
+        "range": "от 0 до 1",
+        "meaning": (
+            "Насколько категориальный столбец объясняет разброс числового. "
+            "Высокое η — средние/медианы числа заметно различаются между группами."
+        ),
+        "thresholds": "Сильная: η ≥ 0.5. Умеренная: 0.3 ≤ η < 0.5. Слабые связи скрыты.",
+    },
+}
 
 
 def _column_kind(df: pd.DataFrame, col: str, parsed_structure: dict | None) -> str:
@@ -142,6 +174,29 @@ def build_quality_report(df: pd.DataFrame, parsed_structure: dict | None = None)
         })
 
     avg_missing = round(sum(c["missing_pct"] for c in columns) / col_count, 2) if col_count else 0.0
+    moderate_missing = sum(1 for c in columns if "moderate_missing" in c.get("issues", []))
+    identifier_count = sum(
+        1 for c in columns if c["kind"] == "identifier" or "likely_identifier" in c.get("issues", [])
+    )
+
+    kind_counts: dict[str, int] = {}
+    for col in columns:
+        kind_counts[col["kind"]] = kind_counts.get(col["kind"], 0) + 1
+
+    complete_rows = int(df.dropna(how="any").shape[0]) if rows else 0
+    complete_rows_pct = round(complete_rows / rows * 100, 2) if rows else 0.0
+    rows_with_missing = rows - complete_rows
+
+    total_cells = rows * col_count if rows and col_count else 0
+    filled_cells = sum(c["non_null"] for c in columns)
+    fill_rate_pct = round(filled_cells / total_cells * 100, 2) if total_cells else 100.0
+
+    top_missing = sorted(
+        [c for c in columns if c["missing_pct"] > 0],
+        key=lambda c: c["missing_pct"],
+        reverse=True,
+    )[:5]
+
     score = 100.0
     score -= min(avg_missing * 0.6, 30)
     score -= min(duplicate_pct * 0.5, 20)
@@ -173,6 +228,18 @@ def build_quality_report(df: pd.DataFrame, parsed_structure: dict | None = None)
             "columns_with_high_missing": issue_counts["high_missing"],
             "constant_columns": issue_counts["constant"],
             "near_unique_columns": issue_counts["near_unique"],
+            "moderate_missing_columns": moderate_missing,
+            "identifier_columns": identifier_count,
+            "complete_rows": complete_rows,
+            "complete_rows_pct": complete_rows_pct,
+            "rows_with_missing": rows_with_missing,
+            "fill_rate_pct": fill_rate_pct,
+            "column_kinds": kind_counts,
+            "usable_columns": max(0, col_count - issue_counts["constant"] - identifier_count),
+            "top_missing_columns": [
+                {"name": c["name"], "missing_pct": c["missing_pct"], "kind": c["kind"]}
+                for c in top_missing
+            ],
         },
         "columns": columns,
     })
@@ -206,7 +273,7 @@ def compute_correlations(df: pd.DataFrame, parsed_structure: dict | None = None)
                     "direction": "положительная" if r > 0 else "отрицательная",
                 })
         numeric_pairs.sort(key=lambda x: abs(x["pearson"]), reverse=True)
-        numeric_pairs = numeric_pairs[:TOP_NUMERIC_PAIRS]
+        numeric_pairs = [p for p in numeric_pairs if _is_notable_strength(p["strength"])][:TOP_NUMERIC_PAIRS]
 
     cat_cols_limited = sorted(
         categorical_cols,
@@ -226,7 +293,7 @@ def compute_correlations(df: pd.DataFrame, parsed_structure: dict | None = None)
                 "strength": _strength_label(v, strong=0.5, moderate=0.3),
             })
     categorical_pairs.sort(key=lambda x: x["cramers_v"], reverse=True)
-    categorical_pairs = categorical_pairs[:TOP_CATEGORICAL_PAIRS]
+    categorical_pairs = [p for p in categorical_pairs if _is_notable_strength(p["strength"])][:TOP_CATEGORICAL_PAIRS]
 
     cat_numeric: list[dict] = []
     if numeric_cols and cat_cols_limited:
@@ -242,7 +309,7 @@ def compute_correlations(df: pd.DataFrame, parsed_structure: dict | None = None)
                     "strength": _strength_label(eta, strong=0.5, moderate=0.3),
                 })
         cat_numeric.sort(key=lambda x: x["eta"], reverse=True)
-        cat_numeric = cat_numeric[:TOP_CAT_NUMERIC]
+        cat_numeric = [p for p in cat_numeric if _is_notable_strength(p["strength"])][:TOP_CAT_NUMERIC]
 
     return convert_numpy_types({
         "numeric_columns": numeric_cols,
@@ -250,28 +317,34 @@ def compute_correlations(df: pd.DataFrame, parsed_structure: dict | None = None)
         "numeric_pairs": numeric_pairs,
         "categorical_pairs": categorical_pairs,
         "categorical_numeric": cat_numeric,
+        "help": CORRELATION_HELP,
+        "filter_note": "Показаны только сильные и умеренные связи; слабые отфильтрованы.",
     })
 
 
 def format_quality_report(report: dict) -> str:
     summary = report.get("summary", {})
+    kinds = summary.get("column_kinds") or {}
+    kind_line = ", ".join(
+        f"{k}: {v}" for k, v in sorted(kinds.items(), key=lambda x: -x[1])
+    )
+
     lines = [
         "ОТЧЁТ О КАЧЕСТВЕ ДАННЫХ",
         "=" * 36,
+        f"Оценка: {summary.get('overall_score', 0)}/100 ({summary.get('overall_grade_label', '—')})",
         f"Строк: {summary.get('rows', 0)}, столбцов: {summary.get('columns', 0)}",
-        f"Дубликаты строк: {summary.get('duplicate_rows', 0)} "
-        f"({summary.get('duplicate_pct', 0)}%)",
+        f"Заполненность ячеек: {summary.get('fill_rate_pct', 0)}%",
+        f"Строк без пропусков: {summary.get('complete_rows', 0)} ({summary.get('complete_rows_pct', 0)}%)",
+        f"Дубликаты: {summary.get('duplicate_rows', 0)} ({summary.get('duplicate_pct', 0)}%)",
         f"Средний % пропусков: {summary.get('avg_missing_pct', 0)}%",
-        f"Оценка качества: {summary.get('overall_score', 0)}/100 "
-        f"({summary.get('overall_grade_label', '—')})",
-        "",
-        "Столбцы с замечаниями:",
+        f"Столбцов для анализа: {summary.get('usable_columns', 0)}",
     ]
+    if kind_line:
+        lines.append(f"Состав: {kind_line}")
+    lines.extend(["", "Столбцы с замечаниями:"])
 
-    flagged = [
-        c for c in report.get("columns", [])
-        if c.get("issues")
-    ]
+    flagged = [c for c in report.get("columns", []) if c.get("issues")]
     if not flagged:
         lines.append("  • Критичных проблем не обнаружено.")
     else:
@@ -281,6 +354,12 @@ def format_quality_report(report: dict) -> str:
                 f"  • {col['name']} ({col['kind']}): пропуски {col['missing_pct']}%, "
                 f"уникальных {col['nunique']} — {issues}"
             )
+
+    top_missing = summary.get("top_missing_columns") or []
+    if top_missing:
+        lines.extend(["", "Топ пропусков:"])
+        for col in top_missing:
+            lines.append(f"  • {col['name']}: {col['missing_pct']}%")
 
     lines.append("")
     lines.append("---JSON---")
@@ -292,7 +371,15 @@ def format_correlations(data: dict) -> str:
     lines = [
         "СВЯЗИ МЕЖДУ СТОЛБЦАМИ",
         "=" * 36,
+        data.get("filter_note", "Показаны только сильные и умеренные связи."),
+        "",
     ]
+
+    help_block = data.get("help") or CORRELATION_HELP
+    lines.append("Справка:")
+    for item in help_block.values():
+        lines.append(f"  • {item['name']}: {item['thresholds']}")
+    lines.append("")
 
     num_pairs = data.get("numeric_pairs", [])
     if num_pairs:
