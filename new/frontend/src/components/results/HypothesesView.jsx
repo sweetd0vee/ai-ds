@@ -14,6 +14,9 @@ function HypothesisCard({ item }) {
       <header className="hypothesis-card-header">
         <span className="hypothesis-id">#{item.id}</span>
         <h4 className="hypothesis-title">{item.title}</h4>
+        {item.kind_label || item.kind ? (
+          <span className="hypothesis-kind">{item.kind_label || item.kind}</span>
+        ) : null}
         <span className={`hypothesis-priority hypothesis-priority--${priority}`}>
           {item.priority_label || PRIORITY_LABELS[priority] || priority}
         </span>
@@ -87,8 +90,8 @@ export default function HypothesesView({ results }) {
       <div className="hypotheses-intro-block">
         <h3 className="hypotheses-heading">Проверяемые гипотезы</h3>
         <p className="hypotheses-intro">
-          Ниже — гипотезы, сформулированные на основе метрик, качества данных и связей между
-          столбцами. Их можно проверить статистическими тестами, сегментацией или визуализацией.
+          Ниже — проверяемые гипотезы, которые Python сначала подтвердил цифрами
+          (ядро рынка, выбросы, редкие категории, различия групп), а затем модель сформулировала ясным языком.
         </p>
       </div>
 

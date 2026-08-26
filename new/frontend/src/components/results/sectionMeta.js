@@ -4,7 +4,7 @@ export function sectionHasData(sectionId, results) {
   const checks = {
     preview: results.preview,
     structure: results.data_structure || results.parsed_data_structure || results.data_structure_raw,
-    insights: results.quality_report,
+    insights: results.quality_report || results.discovery,
     metrics_plan: results.metrics_plan_dict,
     calculation_code: results.calculation_code,
     metrics: results.metrics_results_raw,
@@ -24,9 +24,12 @@ export function sectionTextContent(sectionId, results) {
   if (sectionId === 'insights') {
     const combined = results.insights_report_raw
     if (combined) return combined
+    const discovery = results.discovery_raw || results.discovery_brief
     const { quality_report_raw: quality, correlations_raw: correlations } = results
-    if (quality && correlations) return `${quality}\n\n${correlations}`
-    return quality || correlations || null
+    if (quality && correlations) {
+      return discovery ? `${quality}\n\n${correlations}\n\n${discovery}` : `${quality}\n\n${correlations}`
+    }
+    return quality || correlations || discovery || null
   }
 
   const fields = {
@@ -42,6 +45,7 @@ export function sectionTextContent(sectionId, results) {
           `Столбцы: ${(h.columns || []).join(', ')}`,
           `Как проверить: ${h.verification}`,
           `Приоритет: ${h.priority_label || h.priority}`,
+          h.kind_label ? `Тип: ${h.kind_label}` : '',
         ].join('\n')).join('\n\n')
       : results.hypotheses_raw,
     report: results.final_report,

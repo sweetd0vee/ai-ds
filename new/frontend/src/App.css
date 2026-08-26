@@ -1023,9 +1023,112 @@
   color: #b45309;
 }
 
-.hypothesis-priority--low {
-  background: rgba(5, 150, 105, 0.12);
-  color: #047857;
+.hypothesis-kind {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(29, 78, 216, 0.08);
+  color: var(--link);
+}
+
+.discovery-highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.discovery-card {
+  padding: 14px 16px;
+  border: 1px solid var(--gray-200);
+  border-left: 4px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.discovery-card--high {
+  border-left-color: #dc2626;
+}
+
+.discovery-card--medium {
+  border-left-color: #d97706;
+}
+
+.discovery-card h5 {
+  margin: 6px 0 6px;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.discovery-card p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--gray-700);
+}
+
+.discovery-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.discovery-kind {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+}
+
+.discovery-severity {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.discovery-severity--high {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
+.discovery-severity--medium {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+}
+
+.discovery-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--gray-700);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.zone-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.zone-tag--core {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.zone-tag--peri {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
+.zone-tag--flag {
+  background: var(--gray-100);
+  color: var(--gray-600);
 }
 
 .hypothesis-section {

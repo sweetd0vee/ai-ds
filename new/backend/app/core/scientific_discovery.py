@@ -12,10 +12,11 @@ from .data_analysis import classify_column
 from .utils import convert_numpy_types
 
 CORE_COVERAGE = 0.80
+CORE_MIN_SHARE = 0.05
 RARE_SHARE = 0.02
 RARE_COUNT_CAP = 8
 MAX_EXAMPLES = 8
-MAX_HYPOTHESES = 12
+MAX_HYPOTHESES = 14
 
 GEO_HINTS = (
     "город", "city", "town", "населен", "регион", "region", "област",
@@ -222,16 +223,24 @@ def compute_numeric_outliers(df: pd.DataFrame, columns: list[str]) -> list[dict]
         if len(valid) < 8 or valid.nunique() < 4:
             continue
 
-        bounds = _iqr_bounds(s)
+        bounds = _iqr_bounds(s, fence=1.5)
         iqr_mask = pd.Series(False, index=df.index)
         lo = hi = None
         if bounds:
             _, _, _, lo, hi = bounds
             iqr_mask = (s < lo) | (s > hi)
-        z_mask = _modified_z_mask(s)
+            if int(iqr_mask.fillna(False).sum()) / max(rows, 1) > 0.12:
+                bounds3 = _iqr_bounds(s, fence=3.0)
+                if bounds3:
+                    _, _, _, lo, hi = bounds3
+                    iqr_mask = (s < lo) | (s > hi)
+        nunique = int(valid.nunique())
+        z_mask = pd.Series(False, index=df.index)
+        if nunique >= 40:
+            z_mask = _modified_z_mask(s)
         mask = iqr_mask.fillna(False) | z_mask.fillna(False)
         n_out = int(mask.sum())
-        if n_out == 0 and bounds:
+        if n_out == 0:
             continue
 
         outlier_vals = s[mask].dropna()
@@ -302,6 +311,27 @@ def compute_implausible(df: pd.DataFrame, roles: dict) -> list[dict]:
                     "Для площадей это часто ошибка единиц измерения или тестовые данные."
                 ),
             })
+
+    for col in roles.get("numeric") or []:
+        s = _numeric_series(df, col).dropna()
+        nunique = int(s.nunique())
+        if nunique < 3 or nunique > 12:
+            continue
+        vc = s.value_counts()
+        rare_cut = max(2, int(0.01 * len(s)))
+        rare = vc[vc <= rare_cut]
+        if rare.empty:
+            continue
+        parts = ", ".join(f"{_round(val, 2)}×{int(cnt)}" for val, cnt in rare.head(6).items())
+        findings.append({
+            "column": col,
+            "issue": "rare_level",
+            "count": int(rare.sum()),
+            "pct": _pct(int(rare.sum()), rows),
+            "detail": (
+                f"В «{col}» {nunique} дискретных уровней; редкие: {parts}."
+            ),
+        })
     return findings
 
 
@@ -343,14 +373,15 @@ def compute_concentration(df: pd.DataFrame, columns: list[str], roles: dict) -> 
         vc = s.value_counts()
         scripts = s.map(_script_kind)
         majority_script = scripts.mode().iloc[0] if not scripts.empty else "other"
-
-        cumulative = 0
-        core_values = []
-        for value, count in vc.items():
-            core_values.append(value)
-            cumulative += int(count)
-            if cumulative / max(rows, 1) >= CORE_COVERAGE:
-                break
+        core_values = [value for value, count in vc.items() if count / max(rows, 1) >= CORE_MIN_SHARE]
+        if not core_values or sum(int(vc[v]) for v in core_values) / max(rows, 1) < 0.50:
+            cumulative = 0
+            core_values = []
+            for value, count in vc.items():
+                core_values.append(value)
+                cumulative += int(count)
+                if cumulative / max(rows, 1) >= CORE_COVERAGE:
+                    break
 
         core_set = set(core_values)
         core_count = int(vc[vc.index.isin(core_set)].sum())
@@ -421,6 +452,9 @@ def compute_group_profiles(
             overall_median = float(frame["val"].median())
             overall_mean = float(frame["val"].mean())
             grouped = frame.groupby("cat")["val"].agg(["count", "median", "mean", "min", "max"])
+            grouped = grouped[grouped["count"] >= 5]
+            if grouped.empty or len(grouped) < 2:
+                continue
             grouped = grouped.sort_values("count", ascending=False).head(max_groups)
             groups = []
             for name, row in grouped.iterrows():
@@ -441,7 +475,8 @@ def compute_group_profiles(
                     "median_vs_overall": _round(ratio, 2) if ratio is not None else None,
                     "flags": flags,
                 })
-            medians = grouped["median"]
+            medians_src = grouped[grouped["count"] >= 10] if (grouped["count"] >= 10).sum() >= 2 else grouped
+            medians = medians_src["median"]
             profiles.append({
                 "categorical": cat,
                 "numeric": num,

@@ -78,11 +78,189 @@ function filterNotable(pairs, getStrength) {
   return (pairs || []).filter((p) => NOTABLE_STRENGTHS.has(getStrength(p)))
 }
 
+function DiscoveryPanel({ discovery }) {
+  if (!discovery) return null
+
+  const highlights = discovery.highlights || []
+  const concentration = discovery.concentration || []
+  const outliers = discovery.outliers || []
+  const implausible = discovery.implausible || []
+  const duplicates = discovery.label_duplicates || []
+  const derived = discovery.derived || []
+  const kindLabels = discovery.kind_labels || {}
+
+  return (
+    <>
+      {highlights.length > 0 && (
+        <div className="insights-block">
+          <h4>Что нашёл электронный data scientist</h4>
+          <p className="insights-desc">
+            Факты посчитаны на Python: ядро рынка, выбросы, редкие категории и подозрительные шкалы.
+          </p>
+          <div className="discovery-highlights">
+            {highlights.map((item, i) => (
+              <article key={`${item.kind}-${i}`} className={`discovery-card discovery-card--${item.severity || 'medium'}`}>
+                <div className="discovery-card-meta">
+                  <span className="discovery-kind">{kindLabels[item.kind] || item.kind}</span>
+                  {item.severity && (
+                    <span className={`discovery-severity discovery-severity--${item.severity}`}>
+                      {item.severity === 'high' ? 'важно' : 'заметка'}
+                    </span>
+                  )}
+                </div>
+                <h5>{item.title}</h5>
+                <p>{item.detail}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {concentration.map((item) => (
+        <div key={`conc-${item.column}`} className="insights-block">
+          <h4>
+            {item.role === 'geo' ? 'Основная область и периферия' : 'Концентрация категорий'}: {item.column}
+          </h4>
+          <p className="insights-desc">
+            Ядро — {item.core_size} из {item.n_categories} значений, {item.core_coverage_pct}% строк.
+            Остальное не попадает в основную область.
+          </p>
+          <div className="insights-table-wrap">
+            <table className="insights-table">
+              <thead>
+                <tr>
+                  <th>Значение</th>
+                  <th>Записей</th>
+                  <th>Доля</th>
+                  <th>Зона</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(item.core || []).map((row) => (
+                  <tr key={`core-${row.value}`}>
+                    <td>{row.value}</td>
+                    <td>{row.count}</td>
+                    <td>{row.share_pct}%</td>
+                    <td><span className="zone-tag zone-tag--core">ядро</span></td>
+                  </tr>
+                ))}
+                {(item.periphery || []).map((row) => (
+                  <tr key={`peri-${row.value}`}>
+                    <td>{row.value}</td>
+                    <td>{row.count}</td>
+                    <td>{row.share_pct}%</td>
+                    <td>
+                      <span className="zone-tag zone-tag--peri">вне ядра</span>
+                      {(row.flags || []).filter((f) => f !== 'periphery').map((flag) => (
+                        <span key={flag} className="zone-tag zone-tag--flag">{flag}</span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      {outliers.length > 0 && (
+        <div className="insights-block">
+          <h4>Выбросы</h4>
+          <div className="insights-table-wrap">
+            <table className="insights-table">
+              <thead>
+                <tr>
+                  <th>Столбец</th>
+                  <th>Выбросов</th>
+                  <th>%</th>
+                  <th>Медиана</th>
+                  <th>Min…Max</th>
+                  <th>Примеры</th>
+                </tr>
+              </thead>
+              <tbody>
+                {outliers.map((row) => (
+                  <tr key={row.column}>
+                    <td>{row.column}</td>
+                    <td>{row.n_outliers}</td>
+                    <td>{row.pct}%</td>
+                    <td>{row.median}</td>
+                    <td>{row.min} … {row.max}</td>
+                    <td>
+                      {(row.examples || []).slice(0, 4).map((ex) => `${ex.value}×${ex.count}`).join(', ') || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {implausible.length > 0 && (
+        <div className="insights-block">
+          <h4>Подозрительные значения</h4>
+          <ul className="discovery-list">
+            {implausible.map((item, i) => (
+              <li key={`${item.column}-${i}`}>{item.detail}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {duplicates.length > 0 && (
+        <div className="insights-block">
+          <h4>Одинаковые категории с разным написанием</h4>
+          <ul className="discovery-list">
+            {duplicates.map((item) => (
+              <li key={`${item.column}-${item.canonical}`}>
+                <strong>{item.column}:</strong>{' '}
+                {(item.variants || []).map((v) => `«${v.value}» × ${v.count}`).join(', ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {derived.length > 0 && (
+        <div className="insights-block">
+          <h4>Производные метрики</h4>
+          <div className="insights-table-wrap">
+            <table className="insights-table">
+              <thead>
+                <tr>
+                  <th>Метрика</th>
+                  <th>Медиана</th>
+                  <th>Среднее</th>
+                  <th>Min</th>
+                  <th>Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                {derived.map((row) => (
+                  <tr key={row.name}>
+                    <td>{row.name}</td>
+                    <td>{row.median}</td>
+                    <td>{row.mean}</td>
+                    <td>{row.min}</td>
+                    <td>{row.max}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function InsightsView({ results }) {
   const quality = results?.quality_report
   const correlations = results?.correlations
+  const discovery = results?.discovery
 
-  if (!quality) {
+  if (!quality && !discovery) {
     return (
       <pre className="code-view">
         {results?.quality_report_raw || 'Ожидание анализа качества…'}
@@ -90,7 +268,7 @@ export default function InsightsView({ results }) {
     )
   }
 
-  const summary = quality.summary || {}
+  const summary = quality?.summary || {}
   const gradeClass = GRADE_CLASS[summary.overall_grade] || 'grade-fair'
   const kinds = summary.column_kinds || {}
 
@@ -119,7 +297,7 @@ export default function InsightsView({ results }) {
   }))
 
   const hasCorrelations = numericRows.length || categoricalRows.length || mixedRows.length
-  const flaggedColumns = quality.columns?.filter((c) => c.issues?.length) || []
+  const flaggedColumns = quality?.columns?.filter((c) => c.issues?.length) || []
   const topMissing = summary.top_missing_columns || []
 
   return (
@@ -135,6 +313,8 @@ export default function InsightsView({ results }) {
           </p>
         </div>
       </div>
+
+      <DiscoveryPanel discovery={discovery} />
 
       <div className="insights-stats">
         <div className="insight-stat">

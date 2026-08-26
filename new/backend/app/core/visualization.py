@@ -32,6 +32,7 @@ BUSINESS_KEYWORDS = (
     "revenue", "profit", "margin", "price", "cost", "sales", "amount",
     "quantity", "score", "rating", "nps", "total", "sum", "avg", "mean",
     "доход", "выруч", "прибыл", "марж", "цена", "сумм", "колич", "оценк",
+    "плат", "аренд", "площад",
 )
 
 SKIP_NAME_HINTS = (
@@ -185,12 +186,12 @@ def _collect_discovery_candidates(
         score = 96.0 if conc.get("role") == "geo" else 88.0
 
         def core_bar(c=col, peri=peri_set, role=conc.get("role")):
-            vc = work[c].astype(str).str.strip().value_counts().head(20)
+            vc = work[c].astype(str).str.strip().value_counts().head(20).sort_values()
             if len(vc) < 3:
                 return None
-            colors = ["#0f766e" if name not in peri else "#dc2626" for name in vc.index]
+            colors = ["#dc2626" if name in peri else "#0f766e" for name in vc.index]
             fig, ax = plt.subplots(figsize=(10, max(4.5, len(vc) * 0.38)))
-            vc.sort_values().plot(kind="barh", ax=ax, color=list(reversed(colors)))
+            vc.plot(kind="barh", ax=ax, color=colors)
             title = f"Основная область vs периферия: {c}" if role == "geo" else f"Частоты категорий: {c}"
             ax.set_title(title)
             ax.set_xlabel("Количество записей")
@@ -211,7 +212,10 @@ def _collect_discovery_candidates(
             if len(series) < 8:
                 return None
             fig, ax = plt.subplots(figsize=(8, 5))
-            ax.boxplot(series, vert=True, labels=[c], showfliers=True)
+            try:
+                ax.boxplot(series, vert=True, tick_labels=[c], showfliers=True)
+            except TypeError:
+                ax.boxplot(series, vert=True, labels=[c], showfliers=True)
             ax.set_title(f"Выбросы {c}: {n} точек, медиана {med}")
             ax.set_ylabel(c)
             return _save_fig(output_dir, _safe_filename(c, "outliers", "box"))
@@ -438,7 +442,7 @@ def _collect_candidates(
     # 6. Частоты категорий (только информативные, низкая кардинальность)
     for col in categorical[:4]:
         nunique = df[col].nunique(dropna=True)
-        if nunique < 2 or nunique > 15:
+        if nunique < 2 or nunique > 25:
             continue
         score = 55.0 + _column_importance(col, df[col], "categorical") * 0.5
 
@@ -523,6 +527,7 @@ def generate_visualizations(
     *,
     correlations: dict | None = None,
     parsed_structure: dict | None = None,
+    discovery: dict | None = None,
 ) -> tuple[list[str], str, str, list[dict]]:
     """Возвращает (список png, справочный код, лог выполнения, метаданные графиков)."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -532,7 +537,8 @@ def generate_visualizations(
         from .data_insights import compute_correlations
         correlations = compute_correlations(df, parsed_structure)
 
-    candidates = _collect_candidates(df, output_dir, groups, correlations)
+    candidates = _collect_discovery_candidates(df, output_dir, discovery)
+    candidates.extend(_collect_candidates(df, output_dir, groups, correlations))
     candidates.sort(key=lambda c: c.score, reverse=True)
 
     plot_files: list[str] = []
@@ -583,6 +589,7 @@ def format_viz_code_reference(plot_files: list[str], graph_count: int) -> str:
         "    df, output_dir, graph_count,",
         "    correlations=correlations,",
         "    parsed_structure=parsed_structure,",
+        "    discovery=discovery,",
         ")",
         "print(log)",
         "",

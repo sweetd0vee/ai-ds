@@ -9,6 +9,9 @@ import pandas as pd
 
 _PLOT_SUFFIXES = (
     "_mean_bar",
+    "_median_bar",
+    "_outliers_box",
+    "_core_bar",
     "_timeseries",
     "_crosstab",
     "_scatter",
@@ -40,11 +43,11 @@ def _parse_filename(filename: str) -> dict[str, Any]:
             parsed: dict[str, Any] = {"kind": kind, "parts": parts}
             if kind == "scatter" and len(parts) >= 2:
                 parsed["col_x"], parsed["col_y"] = parts[0], parts[1]
-            elif kind in ("mean_bar", "box") and len(parts) >= 2:
+            elif kind in ("mean_bar", "median_bar", "box") and len(parts) >= 2:
                 parsed["numeric"], parsed["categorical"] = parts[0], "_".join(parts[1:])
             elif kind == "timeseries" and len(parts) >= 2:
                 parsed["metric"], parsed["date_col"] = parts[0], "_".join(parts[1:])
-            elif kind in ("count", "hist") and parts:
+            elif kind in ("count", "hist", "core_bar", "outliers_box") and parts:
                 parsed["column"] = "_".join(parts)
             elif kind == "crosstab" and len(parts) >= 2:
                 parsed["col_a"], parsed["col_b"] = parts[0], "_".join(parts[1:])
@@ -95,8 +98,12 @@ def _title_from_parsed(parsed: dict[str, Any], label: str = "") -> str:
     if kind == "scatter":
         x, y = parsed.get("col_x", ""), parsed.get("col_y", "")
         return f"Зависимость {y} от {x}"
-    if kind == "mean_bar":
-        return f"Среднее {parsed.get('numeric', '')} по {parsed.get('categorical', '')}"
+    if kind == "median_bar":
+        return f"Медиана {parsed.get('numeric', '')} по {parsed.get('categorical', '')}"
+    if kind == "outliers_box":
+        return f"Выбросы: {parsed.get('column', '') or ' '.join(parsed.get('parts') or [])}"
+    if kind == "core_bar":
+        return f"Основная область vs периферия: {parsed.get('column', '') or ' '.join(parsed.get('parts') or [])}"
     if kind == "box":
         return f"Распределение {parsed.get('numeric', '')} по {parsed.get('categorical', '')}"
     if kind == "timeseries":
@@ -330,6 +337,12 @@ def build_plot_conclusion(
             return _conclusion_hist(df, parsed.get("column", ""))
         if kind == "crosstab":
             return _conclusion_crosstab(df, parsed.get("col_a", ""), parsed.get("col_b", ""), correlations)
+        if kind == "core_bar":
+            return _conclusion_count(df, parsed.get("column", "")) + " Красным выделены категории вне основной области (хвост распределения)."
+        if kind == "outliers_box":
+            return _conclusion_hist(df, parsed.get("column", "")) + " Точки за усами — выбросы по IQR."
+        if kind == "median_bar":
+            return _conclusion_mean_bar(df, parsed.get("categorical", ""), parsed.get("numeric", ""), correlations)
     except Exception:
         pass
     return "График отражает закономерности в данных; используйте его для уточнения гипотез и поиска аномалий."

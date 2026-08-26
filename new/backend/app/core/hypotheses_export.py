@@ -74,6 +74,13 @@ def build_hypotheses_docx(
                 label_run.bold = True
                 para.add_run(", ".join(columns))
 
+            kind_label = item.get("kind_label") or item.get("kind")
+            if kind_label:
+                para = doc.add_paragraph()
+                label_run = para.add_run("Тип: ")
+                label_run.bold = True
+                para.add_run(str(kind_label))
+
             doc.add_paragraph()
     else:
         for line in (raw_fallback or format_hypotheses_text([])).splitlines():

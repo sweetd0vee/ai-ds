@@ -1,6 +1,6 @@
 import {
   BarChart3, Brain, Calculator, CheckCircle2, Database, FileText, Hash,
-  Image, Layers, Lightbulb, ListChecks, Palette, ScanSearch, Shield, Table2, Terminal,
+  Image, Layers, Lightbulb, ListChecks, Palette, ScanSearch, Shield, Sparkles, Table2, Terminal,
 } from 'lucide-react'
 
 export const RESULT_ICONS = {
@@ -21,6 +21,7 @@ export const PIPELINE_ICONS = {
   database: Database,
   scan: ScanSearch,
   shield: Shield,
+  sparkles: Sparkles,
   list: ListChecks,
   calculator: Calculator,
   brain: Brain,
