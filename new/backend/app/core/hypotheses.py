@@ -54,6 +54,10 @@ def _normalize_hypothesis(item: dict, index: int) -> dict | None:
 
     priority = _normalize_priority(item.get("priority"))
 
+    kind = str(item.get("kind") or item.get("type") or "").strip()
+    kind_label = str(item.get("kind_label") or "").strip()
+    source = str(item.get("source") or "llm").strip() or "llm"
+
     return {
         "id": int(item.get("id") or index + 1),
         "title": title or f"Гипотеза {index + 1}",
@@ -63,6 +67,9 @@ def _normalize_hypothesis(item: dict, index: int) -> dict | None:
         "verification": verification,
         "priority": priority,
         "priority_label": _PRIORITY_LABELS[priority],
+        "kind": kind,
+        "kind_label": kind_label,
+        "source": source,
     }
 
 
@@ -221,6 +228,57 @@ def format_hypotheses_text(hypotheses: list[dict]) -> str:
             f"Столбцы: {cols}",
             f"Как проверить: {item.get('verification', '—')}",
             f"Приоритет: {item.get('priority_label', item.get('priority', 'medium'))}",
+            f"Тип: {item.get('kind_label') or item.get('kind') or '—'}",
             "",
         ])
     return "\n".join(lines).strip()
+
+
+def merge_hypotheses(python_hyps: list[dict], llm_hyps: list[dict] | None = None) -> list[dict]:
+    """База — гипотезы Python (с цифрами); LLM только уточняет формулировки и может добавить новые."""
+    from .scientific_discovery import KIND_LABELS
+
+    base = [h for h in (python_hyps or []) if isinstance(h, dict)]
+    llm = [h for h in (llm_hyps or []) if isinstance(h, dict)]
+    if not llm:
+        return base
+
+    by_id = {int(h.get("id") or 0): h for h in llm if h.get("id") is not None}
+    used_llm_ids: set[int] = set()
+    merged: list[dict] = []
+
+    for index, ph in enumerate(base):
+        pid = int(ph.get("id") or index + 1)
+        lh = by_id.get(pid)
+        item = dict(ph)
+        item["id"] = pid
+        if lh:
+            used_llm_ids.add(pid)
+            for key in ("title", "statement", "verification"):
+                if lh.get(key):
+                    item[key] = lh[key]
+            if lh.get("priority"):
+                item["priority"] = _normalize_priority(lh.get("priority"))
+                item["priority_label"] = _PRIORITY_LABELS[item["priority"]]
+            item["source"] = "python+llm"
+        merged.append(item)
+
+    seen_titles = {str(h.get("title") or "").strip().casefold() for h in merged}
+    next_id = max((int(h.get("id") or 0) for h in merged), default=0) + 1
+    for lh in llm:
+        lid = int(lh.get("id") or 0)
+        if lid in used_llm_ids:
+            continue
+        title_key = str(lh.get("title") or "").strip().casefold()
+        if title_key and title_key in seen_titles:
+            continue
+        extra = dict(lh)
+        extra["id"] = next_id
+        extra["source"] = extra.get("source") or "llm"
+        kind = extra.get("kind") or ""
+        extra["kind_label"] = extra.get("kind_label") or KIND_LABELS.get(kind, kind)
+        merged.append(extra)
+        seen_titles.add(title_key)
+        next_id += 1
+
+    return merged[:15]

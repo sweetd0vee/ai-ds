@@ -13,7 +13,7 @@ export const THEMES = [
   { id: 'monokai', label: 'Neon' },
 ]
 
-const DEFAULT_ANALYST_MODEL = 'qwen3:8b'
+const DEFAULT_ANALYST_MODEL = 'qwen3.8:27b'
 
 const DEFAULT_SETTINGS = {
   theme: 'light',

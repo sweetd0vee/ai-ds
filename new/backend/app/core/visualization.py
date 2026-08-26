@@ -150,6 +150,137 @@ def _rank_columns(df: pd.DataFrame, cols: list[str], kind: str) -> list[str]:
     return [col for col, s in scored if s > 0]
 
 
+def _collect_discovery_candidates(
+    df: pd.DataFrame,
+    output_dir: Path,
+    discovery: dict | None,
+) -> list[PlotCandidate]:
+    if not discovery:
+        return []
+
+    candidates: list[PlotCandidate] = []
+    work = df.copy()
+    for item in discovery.get("derived") or []:
+        name = item.get("name")
+        num_col, den_col = item.get("numerator"), item.get("denominator")
+        if not name or not num_col or not den_col:
+            continue
+        if name in work.columns:
+            continue
+        num = pd.to_numeric(work[num_col], errors="coerce") if num_col in work.columns else None
+        den = pd.to_numeric(work[den_col], errors="coerce") if den_col in work.columns else None
+        if num is None or den is None:
+            continue
+        with np.errstate(divide="ignore", invalid="ignore"):
+            work[name] = num / den.replace(0, np.nan)
+
+    for conc in discovery.get("concentration") or []:
+        col = conc.get("column")
+        if not col or col not in work.columns:
+            continue
+        periphery = conc.get("periphery") or []
+        if conc.get("n_categories", 0) < 3:
+            continue
+        peri_set = {r["value"] for r in periphery}
+        score = 96.0 if conc.get("role") == "geo" else 88.0
+
+        def core_bar(c=col, peri=peri_set, role=conc.get("role")):
+            vc = work[c].astype(str).str.strip().value_counts().head(20)
+            if len(vc) < 3:
+                return None
+            colors = ["#0f766e" if name not in peri else "#dc2626" for name in vc.index]
+            fig, ax = plt.subplots(figsize=(10, max(4.5, len(vc) * 0.38)))
+            vc.sort_values().plot(kind="barh", ax=ax, color=list(reversed(colors)))
+            title = f"Основная область vs периферия: {c}" if role == "geo" else f"Частоты категорий: {c}"
+            ax.set_title(title)
+            ax.set_xlabel("Количество записей")
+            return _save_fig(output_dir, _safe_filename(c, "core", "bar"))
+
+        candidates.append(PlotCandidate(score, f"core bar {col}", core_bar))
+
+    for out in discovery.get("outliers") or []:
+        col = out.get("column")
+        if not col or col not in work.columns:
+            continue
+        n_out = out.get("n_outliers") or 0
+        if n_out <= 0:
+            continue
+
+        def outlier_box(c=col, n=n_out, med=out.get("median")):
+            series = pd.to_numeric(work[c], errors="coerce").dropna()
+            if len(series) < 8:
+                return None
+            fig, ax = plt.subplots(figsize=(8, 5))
+            ax.boxplot(series, vert=True, labels=[c], showfliers=True)
+            ax.set_title(f"Выбросы {c}: {n} точек, медиана {med}")
+            ax.set_ylabel(c)
+            return _save_fig(output_dir, _safe_filename(c, "outliers", "box"))
+
+        candidates.append(PlotCandidate(94.0, f"outliers {col}", outlier_box))
+
+    roles = discovery.get("roles") or {}
+    geo = (roles.get("geo") or [None])[0]
+    money = (roles.get("money") or [None])[0]
+    area = (roles.get("area") or [None])[0]
+    derived_name = (discovery.get("derived") or [{}])[0].get("name") if discovery.get("derived") else None
+
+    if geo and money and geo in work.columns and money in work.columns:
+
+        def money_by_geo(g=geo, m=money):
+            sub = work[[g, m]].copy()
+            sub[m] = pd.to_numeric(sub[m], errors="coerce")
+            sub = sub.dropna()
+            if sub.empty:
+                return None
+            med = sub.groupby(sub[g].astype(str).str.strip(), observed=True)[m].median().sort_values(ascending=False)
+            med = med.head(16)
+            if len(med) < 2:
+                return None
+            fig, ax = plt.subplots(figsize=(11, 5))
+            med.plot(kind="bar", ax=ax, color=sns.color_palette("viridis", len(med)))
+            ax.set_title(f"Медиана {m} по {g}")
+            ax.set_ylabel(m)
+            ax.tick_params(axis="x", rotation=45)
+            return _save_fig(output_dir, _safe_filename(m, g, "median_bar"))
+
+        candidates.append(PlotCandidate(93.0, f"median {money} by {geo}", money_by_geo))
+
+    if derived_name and geo and derived_name in work.columns and geo in work.columns:
+
+        def derived_by_geo(g=geo, d=derived_name):
+            sub = work[[g, d]].copy()
+            sub[d] = pd.to_numeric(sub[d], errors="coerce")
+            sub = sub.dropna()
+            med = sub.groupby(sub[g].astype(str).str.strip(), observed=True)[d].median().sort_values(ascending=False)
+            med = med.head(16)
+            if len(med) < 2:
+                return None
+            fig, ax = plt.subplots(figsize=(11, 5))
+            med.plot(kind="bar", ax=ax, color=sns.color_palette("magma", len(med)))
+            ax.set_title(f"Медиана {d} по {g}")
+            ax.tick_params(axis="x", rotation=45)
+            return _save_fig(output_dir, _safe_filename("derived", g, "bar"))
+
+        candidates.append(PlotCandidate(92.0, f"derived by {geo}", derived_by_geo))
+
+    if area and money and area in work.columns and money in work.columns:
+
+        def area_money_scatter(a=area, m=money):
+            sub = work[[a, m]].apply(pd.to_numeric, errors="coerce").dropna()
+            if len(sub) < 8:
+                return None
+            fig, ax = plt.subplots()
+            ax.scatter(sub[a], sub[m], alpha=0.45, s=28, c="#1d4ed8")
+            ax.set_xlabel(a)
+            ax.set_ylabel(m)
+            ax.set_title(f"{m} vs {a}")
+            return _save_fig(output_dir, _safe_filename(a, m, "scatter"))
+
+        candidates.append(PlotCandidate(90.0, f"scatter {area} vs {money}", area_money_scatter))
+
+    return candidates
+
+
 def _collect_candidates(
     df: pd.DataFrame,
     output_dir: Path,

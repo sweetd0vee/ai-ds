@@ -19,7 +19,7 @@ class JobStatusResponse(BaseModel):
     error: str | None = None
     filename: str
     graph_count: int = 20
-    analyst_model: str = "qwen3:8b"
+    analyst_model: str = "qwen3.8:27b"
     results: dict[str, Any] | None = None
 
 
@@ -40,7 +40,7 @@ class JobListItem(BaseModel):
     status: str
     progress: int = 0
     graph_count: int = 20
-    analyst_model: str = "qwen3:8b"
+    analyst_model: str = "qwen3.8:27b"
     created_at: str
     updated_at: str
     rows: int | None = None

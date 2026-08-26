@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-API_PORT = int(os.environ.get("API_PORT", "8010"))
+API_PORT = int(os.environ.get("API_PORT", "8021"))
 APP_TITLE = "Электронный Data Scientist API"
 
 REQUIRED = ("fastapi", "uvicorn", "pandas", "langchain_community", "langchain_classic")
@@ -49,7 +49,7 @@ def check_port_available(port: int) -> None:
     title = payload.get("info", {}).get("title", "unknown")
     if title != APP_TITLE:
         print(f"Порт {port} занят другим приложением: {title}")
-        print(f"Запустите на свободном порту: set API_PORT=8800 && python run_dev.py")
+        print(f"Запустите на свободном порту: set API_PORT=8821 && python run_dev.py")
         sys.exit(1)
 
 

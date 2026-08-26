@@ -1,10 +1,16 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 
 from .analysis_export import build_analysis_docx
-from .hypotheses import parse_hypotheses
+from .hypotheses import merge_hypotheses, parse_hypotheses
 from .hypotheses_export import build_hypotheses_docx
+from .scientific_discovery import (
+    discover_insights,
+    format_discovery_brief,
+    format_discovery_report,
+)
 from .report_export import build_report_docx
 from .data_analysis import (
     analyze_data_structure,
@@ -168,7 +174,37 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
             job_id, "data_insights", 30, "Качество и связи готовы", partial=state
         )
 
-        await store.update(job_id, "metrics_plan", 32, "План метрик (Python)")
+        await store.update(job_id, "scientific_discovery", 31, "Поиск аномалий и инсайтов (Python)")
+        discovery = await asyncio.to_thread(
+            discover_insights, df_processed, parsed_structure, correlations
+        )
+        discovery_brief = format_discovery_brief(discovery)
+        discovery_raw = format_discovery_report(discovery)
+        python_hypotheses = discovery.get("hypotheses") or []
+        state.update({
+            "discovery": discovery,
+            "discovery_brief": discovery_brief,
+            "discovery_raw": discovery_raw,
+            "hypotheses": python_hypotheses,
+        })
+        await asyncio.to_thread(
+            _save_text, output_dir / "discovery_insights.txt", discovery_raw
+        )
+        insights_report_raw = (
+            format_insights_report(quality_report, correlations)
+            + "\n\n"
+            + discovery_raw
+        )
+        state["insights_report_raw"] = insights_report_raw
+        await store.update(
+            job_id,
+            "scientific_discovery",
+            34,
+            f"Найдено инсайтов: {len(discovery.get('highlights') or [])}, гипотез: {len(python_hypotheses)}",
+            partial=state,
+        )
+
+        await store.update(job_id, "metrics_plan", 36, "План метрик (Python)")
         metrics_plan_dict, metrics_plan_raw = await asyncio.to_thread(
             build_metrics_plan, df_processed, parsed_structure
         )
@@ -195,37 +231,50 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         state["metrics_results_raw"] = metrics_results_raw
         await store.update(job_id, "metrics_calculation", 55, "Метрики рассчитаны", partial=state)
 
-        await store.update(job_id, "metrics_analysis", 60, "Анализ метрик (LLM)")
-        analysis_summary = await chain_invoke(
-            DATA_ANALYZE,
-            "analysis_summary",
-            analyst,
-            partial={
-                "metrics_results_raw": _truncate(metrics_results_raw, 8000),
-                "quality_report_raw": _truncate(quality_report_raw, 4000),
-                "correlations_raw": _truncate(correlations_raw, 4000),
-            },
-        )
+        await store.update(job_id, "metrics_analysis", 60, "Интерпретация инсайтов (LLM)")
+        try:
+            analysis_summary = await chain_invoke(
+                DATA_ANALYZE,
+                "analysis_summary",
+                analyst,
+                partial={
+                    "discovery_brief": _truncate(discovery_brief, 7000),
+                    "quality_report_raw": _truncate(quality_report_raw, 2500),
+                    "correlations_raw": _truncate(correlations_raw, 2500),
+                },
+            )
+        except Exception:
+            logger.exception("LLM analysis failed for job %s, using Python brief", job_id)
+            analysis_summary = discovery_brief
         state["analysis_summary"] = analysis_summary
-        await store.update(job_id, "metrics_analysis", 65, "Анализ метрик готов", partial=state)
+        await store.update(job_id, "metrics_analysis", 65, "Анализ готов", partial=state)
 
-        await store.update(job_id, "hypotheses_generation", 68, "Формулирование гипотез (LLM)")
-        hypotheses_llm = get_llm_analyst(job.analyst_model, num_predict=2800)
-        hypotheses_raw = await chain_invoke(
-            DATA_HYPOTHESES,
-            "hypotheses",
-            hypotheses_llm,
-            partial={
-                "data_structure_raw": _truncate(structure_raw, 3000),
-                "metrics_results_raw": _truncate(metrics_results_raw, 8000),
-                "quality_report_raw": _truncate(quality_report_raw, 4000),
-                "correlations_raw": _truncate(correlations_raw, 4000),
-                "analysis_summary": _truncate(analysis_summary, 3000),
-            },
-        )
-        hypotheses = parse_hypotheses(hypotheses_raw)
+        await store.update(job_id, "hypotheses_generation", 68, "Уточнение гипотез (LLM)")
+        hypotheses_raw = ""
+        try:
+            hypotheses_llm = get_llm_analyst(job.analyst_model, num_predict=2800)
+            hypotheses_raw = await chain_invoke(
+                DATA_HYPOTHESES,
+                "hypotheses",
+                hypotheses_llm,
+                partial={
+                    "discovery_brief": _truncate(discovery_brief, 5000),
+                    "python_hypotheses_json": _truncate(
+                        json.dumps(python_hypotheses, ensure_ascii=False, indent=2),
+                        7000,
+                    ),
+                },
+            )
+            llm_hypotheses = parse_hypotheses(hypotheses_raw)
+            hypotheses = merge_hypotheses(python_hypotheses, llm_hypotheses)
+        except Exception:
+            logger.exception("LLM hypotheses failed for job %s, keeping Python hypotheses", job_id)
+            hypotheses = python_hypotheses
+        if not hypotheses:
+            hypotheses = python_hypotheses
         state["hypotheses_raw"] = hypotheses_raw
         state["hypotheses"] = hypotheses
+        state["hypotheses_python"] = python_hypotheses
         await store.update(
             job_id,
             "hypotheses_generation",
@@ -244,6 +293,7 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
                 graph_count,
                 correlations=correlations,
                 parsed_structure=parsed_structure,
+                discovery=discovery,
             )
 
         (plot_files, viz_code, viz_log, plot_details), _ = await asyncio.gather(
@@ -296,6 +346,7 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
             quality_report_raw,
             correlations_raw,
             hypotheses,
+            discovery_raw,
         )
         state["final_report"] = final_report
         await store.update(job_id, "final_report", 92, "Сохранение отчёта", partial=state)

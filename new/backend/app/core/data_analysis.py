@@ -18,6 +18,14 @@ DATE_NAME_HINTS = (
     "день", "дата", "время", "год", "month", "period",
 )
 
+MEASUREMENT_NAME_HINTS = (
+    "площад", "area", "sqm", "кв.м", "кв м", "м.кв", "м кв", "метраж",
+    "price", "цен", "плат", "rent", "cost", "amount", "сумм", "доход",
+    "выруч", "вес", "weight", "объем", "volume", "score", "rating",
+    "оценк", "возраст", "age", "salary", "зарплат", "тариф", "ставк",
+    "width", "height", "depth", "temp", "duration", "длител",
+)
+
 NUMERIC_METRICS = [
     "count", "mean", "median", "mode", "std", "var", "min", "max",
     "quantile_25", "quantile_75", "quantile_90", "quantile_95",
@@ -85,6 +93,11 @@ def _looks_like_datetime(series: pd.Series) -> bool:
     return True
 
 
+def _column_name_suggests_measurement(name: str) -> bool:
+    lower = name.lower()
+    return any(hint in lower for hint in MEASUREMENT_NAME_HINTS)
+
+
 def classify_column(df: pd.DataFrame, col: str) -> str:
     """Возвращает: numeric | categorical | datetime | boolean | identifier | textual."""
     series = df[col]
@@ -100,6 +113,9 @@ def classify_column(df: pd.DataFrame, col: str) -> str:
             return "identifier"
         nunique = series.nunique(dropna=True)
         non_null = series.notna().sum()
+        # Измерения (площадь, цена, рейтинг) оставляем числовыми даже при малом числе уникальных.
+        if _column_name_suggests_measurement(col):
+            return "numeric"
         if non_null and nunique <= min(15, max(2, int(0.1 * non_null))):
             return "categorical"
         return "numeric"

@@ -21,7 +21,7 @@ class Job:
     output_dir: str
     filename: str
     graph_count: int = 20
-    analyst_model: str = "qwen3:8b"
+    analyst_model: str = "qwen3.8:27b"
     status: str = "pending"
     step: str = "pending"
     progress: int = 0
@@ -59,7 +59,7 @@ class JobStore:
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                data.setdefault("analyst_model", "qwen3:8b")
+                data.setdefault("analyst_model", "qwen3.8:27b")
                 if "results" in data:
                     data["results"] = JobStore._normalize_results(data.get("results")) or {}
                 return Job(**data)
@@ -101,7 +101,7 @@ class JobStore:
         output_dir: str,
         filename: str,
         graph_count: int = 20,
-        analyst_model: str = "qwen3:8b",
+        analyst_model: str = "qwen3.8:27b",
     ) -> Job:
         job_id = str(uuid.uuid4())
         job = Job(

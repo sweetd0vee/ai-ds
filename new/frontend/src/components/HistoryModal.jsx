@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FileSpreadsheet, Loader2, Trash2, X } from 'lucide-react'
+import { Eraser, FileSpreadsheet, Loader2, Trash2, X } from 'lucide-react'
 import { clearHistory, deleteHistoryJob, fetchJobHistory } from '../api'
 import { formatDateTime } from '../utils/format'
 
@@ -100,7 +100,7 @@ export default function HistoryModal({ open, onClose, onSelect, onDeleted }) {
                     aria-label="Очистить всю историю"
                     title="Очистить всю историю"
                   >
-                    {clearing ? <Loader2 size={18} className="spin" /> : <X size={18} />}
+                    {clearing ? <Loader2 size={18} className="spin" /> : <Eraser size={18} />}
                   </button>
                 )}
                 <button type="button" className="settings-close" onClick={onClose} aria-label="Закрыть">

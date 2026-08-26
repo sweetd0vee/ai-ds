@@ -8,7 +8,7 @@
 - **Ollama на хосте** — контейнеры ходят в неё по `host.docker.internal:11434`
 
 ```powershell
-ollama pull qwen3:8b
+ollama pull qwen3.8:27b
 ollama pull qwen3-coder
 ```
 
@@ -39,8 +39,8 @@ docker compose up -d
 
 | | Локально (`npm run dev` / `run_dev.py`) | Docker |
 |---|------------------------------------------|--------|
-| UI | http://localhost:5173 | http://localhost:8080 |
-| API | http://localhost:8010 | http://localhost:8020 |
+| UI | http://localhost:5190 | http://localhost:8080 |
+| API | http://localhost:8021 | http://localhost:8020 |
 
 Остановка:
 
@@ -97,7 +97,7 @@ docker compose up -d
 | `UI_PORT` | `8080` | Порт UI на хосте |
 | `API_HOST_PORT` | `8020` | Порт API на хосте (внутри контейнера — 8010) |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | URL Ollama на хосте |
-| `ANALYST_MODEL` | `qwen3:8b` | Модель анализа |
+| `ANALYST_MODEL` | `qwen3.8:27b` | Модель анализа |
 | `CODER_MODEL` | `qwen3-coder:latest` | Модель кода |
 | `CORS_ORIGINS` | `http://localhost:8080,...` | Разрешённые origins для API |
 

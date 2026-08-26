@@ -17,6 +17,7 @@ def build_final_report(
     quality_report_raw: str = "",
     correlations_raw: str = "",
     hypotheses: list[dict] | None = None,
+    discovery_raw: str = "",
 ) -> str:
     rows, cols = int(shape[0]), int(shape[1])
     n_plots = len(plot_files)
@@ -35,19 +36,22 @@ def build_final_report(
         "2. КАЧЕСТВО ДАННЫХ",
         _section_excerpt(quality_report_raw, "---JSON---"),
         "",
-        "3. СВЯЗИ МЕЖДУ СТОЛБЦАМИ",
+        "3. ИНСАЙТЫ, АНОМАЛИИ И ОСНОВНАЯ ОБЛАСТЬ",
+        _section_excerpt(discovery_raw, "---JSON---", limit=4000) if discovery_raw else "  Инсайты недоступны.",
+        "",
+        "4. СВЯЗИ МЕЖДУ СТОЛБЦАМИ",
         _section_excerpt(correlations_raw, "---JSON---"),
         "",
-        "4. КЛЮЧЕВЫЕ НАБЛЮДЕНИЯ ПО МЕТРИКАМ",
+        "5. КЛЮЧЕВЫЕ НАБЛЮДЕНИЯ ПО МЕТРИКАМ",
         metrics_brief,
         "",
-        "5. ИНТЕРПРЕТАЦИЯ АНАЛИЗА",
+        "6. ИНТЕРПРЕТАЦИЯ АНАЛИЗА",
         analysis_summary.strip(),
         "",
-        "6. ГИПОТЕЗЫ ДЛЯ ПРОВЕРКИ",
+        "7. ГИПОТЕЗЫ ДЛЯ ПРОВЕРКИ",
         format_hypotheses_text(hypotheses or []),
         "",
-        "7. ВИЗУАЛИЗАЦИИ",
+        "8. ВИЗУАЛИЗАЦИИ",
     ]
 
     if plot_files:
@@ -57,7 +61,7 @@ def build_final_report(
 
     sections.extend([
         "",
-        "8. РЕКОМЕНДАЦИИ",
+        "9. РЕКОМЕНДАЦИИ",
         _recommendations(metrics_results_raw, rows, cols, quality_report_raw),
         "",
         "— Отчёт сформирован автоматически на основе расчётных метрик и анализа.",

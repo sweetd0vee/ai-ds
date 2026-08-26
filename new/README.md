@@ -18,7 +18,7 @@ ai-ds/
 │   │   │   ├── main.py
 │   │   │   ├── api/routes.py
 │   │   │   └── core/     # промпты, парсеры, pipeline
-│   │   ├── run_dev.py    # запуск dev-сервера (порт 8010)
+│   │   ├── run_dev.py    # запуск dev-сервера (порт 8021)
 │   │   ├── docker/       # Dockerfile для API
 │   │   └── requirements.txt
 │   ├── frontend/         # React (Vite)
@@ -40,7 +40,7 @@ ai-ds/
 - Модели (в PowerShell или cmd):
 
 ```powershell
-ollama pull qwen3:8b
+ollama pull qwen3.8:27b
 ollama pull qwen3-coder
 ```
 
@@ -83,7 +83,7 @@ npm install
 
 Нужны **два терминала** (PowerShell или cmd).
 
-### Терминал 1 — Backend (порт 8010)
+### Терминал 1 — Backend (порт 8021)
 
 **Вариант A** — через `run_dev.py` (рекомендуется):
 
@@ -98,19 +98,19 @@ python run_dev.py
 ```powershell
 cd C:\Users\audit\Work\Arina\2026\ai-ds\new\backend
 .\venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8021
 ```
 
-Проверка: http://localhost:8010/api/health
+Проверка: http://localhost:8021/api/health
 
-### Терминал 2 — Frontend (порт 5173)
+### Терминал 2 — Frontend (порт 5190)
 
 ```powershell
 cd C:\Users\audit\Work\Arina\2026\ai-ds\new\frontend
 npm run dev
 ```
 
-Откройте: **http://localhost:5173**
+Откройте: **http://localhost:5190**
 
 Тестовые датасеты: `datasets\` (9 файлов, от 60 до 2000 строк) — см. `datasets\README.md`
 
@@ -150,7 +150,7 @@ npm run dev
 2. Качество данных и корреляции (Python)
 3. План метрик (Python)
 4. Расчёт метрик (Python)
-5. Интерпретация метрик (LLM `qwen3:8b`)
+5. Интерпретация метрик (LLM `qwen3.8:27b`)
 6. Формулирование гипотез (LLM)
 7. Построение графиков (Python, до 30 PNG)
 8. Итоговый отчёт (Python, .txt + .docx)
@@ -183,6 +183,7 @@ python -m streamlit run old\ins_temp3.py
 | `ModuleNotFoundError: langchain_*` | Активируйте venv и `pip install -r requirements.txt` |
 | Ollama connection error / model 404 | Ollama должна быть запущена; на Windows используйте `127.0.0.1`, не `localhost` (уже в настройках). Проверка: `ollama list` |
 | `Activate.ps1` заблокирован | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` или используйте cmd + `activate.bat` |
-| `Not Found` при загрузке файла | Порты 8000/8001 заняты другими приложениями — backend на :8010; закройте старый Vite на :5173 и перезапустите `npm run dev` |
-| CORS ошибки | Backend на :8010, frontend на :5173 (прокси в vite.config.js) |
+| `Not Found` при загрузке файла | Убедитесь, что backend на :8021, frontend на :5190; перезапустите оба сервера |
+| CORS ошибки | Backend на :8021, frontend на :5190 (прокси в vite.config.js) |
+| Порт занят | Backend: `set API_PORT=8821 && python run_dev.py`; frontend: `set VITE_DEV_PORT=5280 && npm run dev` |
 | Долгий анализ | Нормально — LLM генерирует код и 30 графиков |
