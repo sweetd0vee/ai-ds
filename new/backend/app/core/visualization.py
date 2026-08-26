@@ -405,7 +405,7 @@ def _collect_candidates(
             if sub[c].astype(str).nunique() < 2:
                 return None
             fig, ax = plt.subplots(figsize=(11, 5))
-            sns.boxplot(data=sub, x=c, y=n, ax=ax, palette="Set2")
+            sns.boxplot(data=sub, x=c, y=n, hue=c, ax=ax, palette="Set2", legend=False)
             ax.set_title(f"Распределение {n} по {c}")
             ax.tick_params(axis="x", rotation=45)
             return _save_fig(output_dir, _safe_filename(n, c, "box"))

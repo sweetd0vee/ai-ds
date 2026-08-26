@@ -47,6 +47,13 @@ KIND_LABELS = {
     "implausible": "Подозрительные значения",
 }
 
+SCRIPT_LABELS = {
+    "cyrillic": "кириллицей",
+    "latin": "латиницей",
+    "mixed": "смешанной письменностью",
+    "other": "одной письменностью",
+}
+
 
 def _safe_float(value) -> float | None:
     if value is None:
@@ -736,7 +743,7 @@ def hypotheses_from_discovery(discovery: dict) -> list[dict]:
                 "geo_outlier",
                 f"Иноязычные локации в «{col}»",
                 (
-                    f"Если основной рынок записан {item.get('majority_script', 'одной')} письменностью, "
+                    f"Если основной рынок записан {SCRIPT_LABELS.get(item.get('majority_script'), 'одной письменностью')}, "
                     f"то {names} — инородные точки, которые не должны смешиваться с основным регионом."
                 ),
                 f"Скрипт большинства: {item.get('majority_script')}; иноязычные: {names}.",
@@ -812,7 +819,10 @@ def hypotheses_from_discovery(discovery: dict) -> list[dict]:
             "medium",
         )
 
+    group_added = 0
     for profile in discovery.get("group_profiles") or []:
+        if group_added >= 2:
+            break
         rng = profile.get("median_range") or {}
         ratio = rng.get("ratio") or 0
         if ratio and ratio >= 1.8:
@@ -827,9 +837,10 @@ def hypotheses_from_discovery(discovery: dict) -> list[dict]:
                 ),
                 f"Групповые медианы; overall mean={profile.get('overall_mean')}.",
                 [cat, num],
-                "Kruskal-Wallis / сравнение медиан; boxplot «{num}» по «{cat}».".replace("{num}", num).replace("{cat}", cat),
+                f"Kruskal-Wallis / сравнение медиан; boxplot «{num}» по «{cat}».",
                 "high",
             )
+            group_added += 1
 
     for test in discovery.get("tests") or []:
         if test.get("type") != "spearman":
