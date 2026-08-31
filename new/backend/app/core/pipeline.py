@@ -1,12 +1,10 @@
 import asyncio
-import json
 import logging
 import pickle
 import shutil
 from pathlib import Path
 
 from .analysis_export import build_analysis_docx
-from .hypotheses import merge_hypotheses, parse_hypotheses
 from .hypotheses_export import build_hypotheses_docx
 from .scientific_discovery import (
     discover_insights,
@@ -32,7 +30,7 @@ from .quality_export import build_quality_xlsx, format_insights_report
 from .loaders import load_dataframe, load_tables, tables_meta
 from .llm import chain_invoke, get_llm_analyst
 from .preprocess import preprocess_dates_based_on_llm
-from .prompts import DATA_ANALYZE, DATA_HYPOTHESES
+from .prompts import DATA_ANALYZE
 from .relations import (
     detect_relations,
     format_relations_report,
@@ -162,6 +160,16 @@ def _analyze_one_table(df, parsed_structure: dict) -> dict:
     }
 
 
+def _structure_and_analyze(table: dict) -> tuple[dict, dict]:
+    parsed_structure, structure_raw = analyze_data_structure(table["df"])
+    if not parsed_structure.get("columns"):
+        raise ValueError(f"Не удалось определить структуру: {table['name']}")
+    analysis = _analyze_one_table(table["df"], parsed_structure)
+    analysis["parsed_structure"] = parsed_structure
+    analysis["structure_raw"] = structure_raw
+    return table, analysis
+
+
 def _attach_analysis_to_meta(meta: dict, analysis: dict) -> dict:
     item = dict(meta)
     item.update({
@@ -269,15 +277,9 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         )
 
         await store.update(job_id, "structure_analysis", 18, "Анализ структуры данных (Python)")
-        packaged: list[tuple[dict, dict]] = []
-        for table in tables:
-            parsed_structure, structure_raw = await asyncio.to_thread(analyze_data_structure, table["df"])
-            if not parsed_structure.get("columns"):
-                raise ValueError(f"Не удалось определить структуру: {table['name']}")
-            analysis = await asyncio.to_thread(_analyze_one_table, table["df"], parsed_structure)
-            analysis["parsed_structure"] = parsed_structure
-            analysis["structure_raw"] = structure_raw
-            packaged.append((table, analysis))
+        packaged = list(await asyncio.gather(*[
+            asyncio.to_thread(_structure_and_analyze, table) for table in tables
+        ]))
 
         table_summaries = [
             _attach_analysis_to_meta(meta, analysis)
@@ -408,63 +410,16 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         await store.update(job_id, "metrics_plan", 38, "План метрик готов", partial=state)
         await store.update(job_id, "metrics_calculation", 55, "Метрики рассчитаны", partial=state)
 
-        await store.update(job_id, "metrics_analysis", 60, "Интерпретация инсайтов (LLM)")
-        try:
-            analysis_summary = await chain_invoke(
-                DATA_ANALYZE,
-                "analysis_summary",
-                analyst,
-                partial={
-                    "discovery_brief": _truncate(discovery_brief, 7000),
-                    "quality_report_raw": _truncate(quality_report_raw, 2500),
-                    "correlations_raw": _truncate(correlations_raw, 2500),
-                    "relations_brief": _truncate(
-                        (relations_raw + "\nТаблицы не объединялись.") if len(tables) > 1 else "Одна таблица.",
-                        2500,
-                    ),
-                },
-            )
-        except Exception:
-            logger.exception("LLM analysis failed for job %s, using Python brief", job_id)
-            analysis_summary = discovery_brief
-        state["analysis_summary"] = analysis_summary
-        await store.update(job_id, "metrics_analysis", 65, "Анализ готов", partial=state)
-
-        await store.update(job_id, "hypotheses_generation", 68, "Уточнение гипотез (LLM)")
-        hypotheses_raw = ""
-        try:
-            hypotheses_llm = get_llm_analyst(job.analyst_model, num_predict=2800)
-            hypotheses_raw = await chain_invoke(
-                DATA_HYPOTHESES,
-                "hypotheses",
-                hypotheses_llm,
-                partial={
-                    "discovery_brief": _truncate(discovery_brief, 5000),
-                    "python_hypotheses_json": _truncate(
-                        json.dumps(python_hypotheses, ensure_ascii=False, indent=2),
-                        7000,
-                    ),
-                },
-            )
-            llm_hypotheses = parse_hypotheses(hypotheses_raw)
-            hypotheses = merge_hypotheses(python_hypotheses, llm_hypotheses)
-        except Exception:
-            logger.exception("LLM hypotheses failed for job %s, keeping Python hypotheses", job_id)
-            hypotheses = python_hypotheses
-        if not hypotheses:
-            hypotheses = python_hypotheses
-        state["hypotheses_raw"] = hypotheses_raw
-        state["hypotheses"] = hypotheses
-        state["hypotheses_python"] = python_hypotheses
-        await store.update(
-            job_id,
-            "hypotheses_generation",
-            72,
-            f"Сформулировано гипотез: {len(hypotheses)}",
-            partial=state,
+        llm_discovery = "\n\n".join(
+            f"Таблица «{table['name']}» ({table['rows']}×{table['cols']}):\n"
+            f"{_truncate(analysis['discovery_brief'], 1600)}"
+            for table, analysis in packaged
+        )
+        relations_brief = _truncate(
+            (relations.get("summary") or "") if len(tables) > 1 else "Одна таблица.",
+            600,
         )
 
-        await store.update(job_id, "viz_generation", 74, f"Построение {graph_count} графиков (Python)")
         graph_counts = _split_graph_count(graph_count, len(packaged))
 
         def _run_all_visualizations():
@@ -500,15 +455,51 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
                 codes.append(f"# {table['name']}\n{code}")
             return all_files, "\n\n".join(codes), "\n\n".join(logs), all_details
 
-        (plot_files, viz_code, viz_log, plot_details), _ = await asyncio.gather(
+        async def run_llm_analysis():
+            try:
+                return await chain_invoke(
+                    DATA_ANALYZE,
+                    "analysis_summary",
+                    analyst,
+                    partial={
+                        "discovery_brief": _truncate(llm_discovery, 3600),
+                        "relations_brief": relations_brief,
+                    },
+                )
+            except Exception:
+                logger.exception("LLM analysis failed for job %s, using Python brief", job_id)
+                return llm_discovery
+
+        await store.update(
+            job_id, "metrics_analysis", 60,
+            "Интерпретация инсайтов (LLM) и графики",
+        )
+        (plot_files, viz_code, viz_log, plot_details), analysis_summary = await asyncio.gather(
             asyncio.to_thread(_run_all_visualizations),
-            _save_analysis_reports(
-                output_dir,
-                analysis_summary,
-                source_file=job.filename,
-                hypotheses=hypotheses,
-                hypotheses_raw=hypotheses_raw,
-            ),
+            run_llm_analysis(),
+        )
+        state["analysis_summary"] = analysis_summary
+        hypotheses_raw = ""
+        hypotheses = python_hypotheses
+        state["hypotheses_raw"] = hypotheses_raw
+        state["hypotheses"] = hypotheses
+        state["hypotheses_python"] = python_hypotheses
+        await store.update(job_id, "metrics_analysis", 65, "Анализ готов", partial=state)
+        await store.update(
+            job_id,
+            "hypotheses_generation",
+            72,
+            f"Сформулировано гипотез: {len(hypotheses)}",
+            partial=state,
+        )
+        await store.update(job_id, "viz_generation", 74, f"Построение {graph_count} графиков (Python)")
+
+        await _save_analysis_reports(
+            output_dir,
+            analysis_summary,
+            source_file=job.filename,
+            hypotheses=hypotheses,
+            hypotheses_raw=hypotheses_raw,
         )
 
         table_summaries = [
