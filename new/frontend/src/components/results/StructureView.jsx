@@ -1,3 +1,6 @@
+import { useEffect, useMemo, useState } from 'react'
+import DatasetSwitcher from './DatasetSwitcher'
+
 const KIND_LABELS = {
   numeric: 'Число',
   categorical: 'Категория',
@@ -17,17 +20,9 @@ function formatStructureStats(col) {
   return parts.length ? parts.join(' · ') : '—'
 }
 
-export default function StructureView({ results }) {
-  const structure = results?.data_structure || results?.parsed_data_structure
-  const columns = structure?.columns || []
-  const datetimeCandidates = structure?.datetime_candidates || []
-
-  if (!columns.length) {
-    return <pre className="code-view">{results?.data_structure_raw || 'Ожидание…'}</pre>
-  }
-
+function ColumnsTable({ columns, datetimeCandidates }) {
   return (
-    <div className="structure-view">
+    <>
       <div className="structure-toolbar">
         <span className="structure-count">{columns.length} столбцов</span>
         {datetimeCandidates.length > 0 && (
@@ -62,6 +57,61 @@ export default function StructureView({ results }) {
           </tbody>
         </table>
       </div>
+    </>
+  )
+}
+
+export default function StructureView({ results }) {
+  const analysisStructure = results?.data_structure || results?.parsed_data_structure
+  const tables = results?.tables || []
+
+  const items = useMemo(() => {
+    const list = []
+    if (tables.length > 1 && analysisStructure?.columns?.length) {
+      list.push({
+        id: '__analysis__',
+        label: results.analysis_source === 'join' ? 'Объединённая' : 'Для анализа',
+        rows: results.shape?.[0],
+        cols: results.shape?.[1],
+        structure: analysisStructure,
+      })
+    }
+    tables.forEach((table) => {
+      list.push({
+        id: table.id,
+        label: table.sheet ? `${table.filename} / ${table.sheet}` : table.name,
+        rows: table.rows,
+        cols: table.cols,
+        structure: table.structure || (tables.length === 1 ? analysisStructure : null),
+      })
+    })
+    return list
+  }, [tables, analysisStructure, results])
+
+  const [activeId, setActiveId] = useState(items[0]?.id)
+  useEffect(() => {
+    if (!items.some((item) => item.id === activeId)) {
+      setActiveId(items[0]?.id)
+    }
+  }, [items, activeId])
+
+  const active = items.find((item) => item.id === activeId) || items[0]
+  const structure = active?.structure || analysisStructure
+  const columns = structure?.columns || []
+  const datetimeCandidates = structure?.datetime_candidates || []
+
+  if (!columns.length && !tables.length) {
+    return <pre className="code-view">{results?.data_structure_raw || 'Ожидание…'}</pre>
+  }
+
+  return (
+    <div className="structure-view">
+      <DatasetSwitcher items={items} value={activeId} onChange={setActiveId} />
+      {columns.length ? (
+        <ColumnsTable columns={columns} datetimeCandidates={datetimeCandidates} />
+      ) : (
+        <pre className="code-view">{results?.data_structure_raw || 'Ожидание структуры…'}</pre>
+      )}
     </div>
   )
 }

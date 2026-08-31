@@ -16,6 +16,7 @@
 | [Frontend](frontend.md) | UI, компоненты, темы, взаимодействие с API |
 | [Модель данных](data-model.md) | Структура `Job`, `results`, артефакты на диске |
 | [Code Review](code-review.md) | Оценка качества кода, риски, рекомендации |
+| [Ближайшие доработки](roadmap-presentation.html) | Презентация на 3 слайда (HTML). PPTX: [roadmap-near-term.pptx](roadmap-near-term.pptx) |
 
 ## Версии проекта
 

@@ -45,6 +45,7 @@ KIND_LABELS = {
     "correlation": "Связь признаков",
     "derived": "Производная метрика",
     "implausible": "Подозрительные значения",
+    "table_relation": "Связь таблиц",
 }
 
 SCRIPT_LABELS = {

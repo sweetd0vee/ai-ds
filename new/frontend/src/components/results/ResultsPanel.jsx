@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Download, Loader2, Table2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   downloadAllPlots,
   downloadJobFile,
@@ -8,7 +8,7 @@ import {
   exportHypotheses,
   plotUrl,
 } from '../../api'
-import { PREVIEW_ROWS, RESULT_SECTIONS } from '../../constants'
+import { RESULT_SECTIONS } from '../../constants'
 import { RESULT_ICONS } from '../../utils/icons'
 import CodeSandbox from '../CodeSandbox'
 import AnalysisView from './AnalysisView'
@@ -17,7 +17,8 @@ import CopyButton from './CopyButton'
 import InsightsView from './InsightsView'
 import MetricsPlanView from './MetricsPlanView'
 import PlotsGallery from './PlotsGallery'
-import PreviewTable from './PreviewTable'
+import PreviewView from './PreviewView'
+import RelationsView from './RelationsView'
 import ReportView from './ReportView'
 import StructureView from './StructureView'
 import { sectionHasData, sectionTextContent } from './sectionMeta'
@@ -43,6 +44,12 @@ const SECTION_DOWNLOADS = [
     filename: 'analysis_summary_report.docx',
     label: 'Анализ DOCX',
     when: (_, results) => Boolean(results?.analysis_summary),
+  },
+  {
+    section: 'relations',
+    filename: 'relations.txt',
+    label: 'Связи TXT',
+    when: (_, results) => Boolean(results?.relations_raw && results?.table_count > 1),
   },
   {
     section: 'structure',
@@ -74,23 +81,26 @@ function ResultsContent({
   onToggleHypothesis,
   onSelectAllHypotheses,
   onSelectNoneHypotheses,
+  canAddHypothesis,
+  onHypothesisAdded,
 }) {
   switch (activeSection) {
     case 'preview':
       return (
         <BodyFill>
-          {results?.shape && (
-            <p className="preview-meta">
-              {results.shape[0]} строк × {results.shape[1]} столбцов · первые {PREVIEW_ROWS} записей
-            </p>
-          )}
-          <PreviewTable preview={results?.preview} columns={results?.columns} pending={pending} />
+          <PreviewView results={results} pending={pending} />
         </BodyFill>
       )
     case 'structure':
       return (
         <BodyFill>
           <StructureView results={results} />
+        </BodyFill>
+      )
+    case 'relations':
+      return (
+        <BodyFill>
+          <RelationsView results={results} />
         </BodyFill>
       )
     case 'insights':
@@ -128,6 +138,9 @@ function ResultsContent({
             onToggle={onToggleHypothesis}
             onSelectAll={onSelectAllHypotheses}
             onSelectNone={onSelectNoneHypotheses}
+            jobId={effectiveJobId}
+            canAdd={canAddHypothesis}
+            onAdded={onHypothesisAdded}
           />
         </BodyFill>
       )
@@ -154,7 +167,7 @@ function ResultsContent({
   }
 }
 
-export default function ResultsPanel({ jobId, job, activeSection, onSection, loading = false }) {
+export default function ResultsPanel({ jobId, job, activeSection, onSection, loading = false, onJobUpdate }) {
   const results = job?.results
   const pending = Boolean(
     loading
@@ -171,18 +184,37 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection, loa
   const hypothesisItems = results?.hypotheses || []
   const hypothesisIdsKey = hypothesisItems.map((item) => item.id).join(',')
   const canExportHypotheses = Boolean(hypothesisItems.length || results?.hypotheses_raw)
+  const canAddHypothesis = Boolean(effectiveJobId && job && job.status !== 'running' && job.status !== 'pending')
+  const selectionJobRef = useRef(null)
+  const prevHypothesisIdsRef = useRef('')
 
   useEffect(() => {
-    if (!hypothesisIdsKey) {
+    const parseIds = (key) => key.split(',').filter(Boolean).map((id) => {
+      const numeric = Number(id)
+      return Number.isNaN(numeric) ? id : numeric
+    })
+    const allIds = parseIds(hypothesisIdsKey)
+    const jobChanged = selectionJobRef.current !== effectiveJobId
+    const previousIds = new Set(parseIds(prevHypothesisIdsRef.current))
+    selectionJobRef.current = effectiveJobId
+    prevHypothesisIdsRef.current = hypothesisIdsKey
+
+    if (!effectiveJobId || !allIds.length) {
       setSelectedHypothesisIds(new Set())
       return
     }
-    setSelectedHypothesisIds(new Set(
-      hypothesisIdsKey.split(',').map((id) => {
-        const numeric = Number(id)
-        return Number.isNaN(numeric) ? id : numeric
-      }),
-    ))
+    if (jobChanged) {
+      setSelectedHypothesisIds(new Set(allIds))
+      return
+    }
+    setSelectedHypothesisIds((prev) => {
+      const valid = new Set(allIds)
+      const next = new Set([...prev].filter((id) => valid.has(id)))
+      allIds.forEach((id) => {
+        if (!previousIds.has(id)) next.add(id)
+      })
+      return next
+    })
   }, [effectiveJobId, hypothesisIdsKey])
 
   const handleDownloadAllPlots = async () => {
@@ -237,7 +269,9 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection, loa
     >
       <div className="results-layout">
         <nav className="results-nav">
-          {RESULT_SECTIONS.map((section) => {
+          {RESULT_SECTIONS.filter((section) => (
+            section.id !== 'relations' || (results?.table_count > 1) || (results?.tables?.length > 1)
+          )).map((section) => {
             const Icon = RESULT_ICONS[section.icon] || Table2
             const hasData = sectionHasData(section.id, results)
 
@@ -332,6 +366,8 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection, loa
                 onToggleHypothesis={toggleHypothesis}
                 onSelectAllHypotheses={() => setSelectedHypothesisIds(new Set(hypothesisItems.map((item) => item.id)))}
                 onSelectNoneHypotheses={() => setSelectedHypothesisIds(new Set())}
+                canAddHypothesis={canAddHypothesis}
+                onHypothesisAdded={(data) => onJobUpdate?.(data)}
               />
             </motion.div>
           </AnimatePresence>

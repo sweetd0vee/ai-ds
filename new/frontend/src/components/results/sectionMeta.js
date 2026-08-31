@@ -2,8 +2,9 @@ export function sectionHasData(sectionId, results) {
   if (!results) return false
 
   const checks = {
-    preview: results.preview,
-    structure: results.data_structure || results.parsed_data_structure || results.data_structure_raw,
+    preview: results.preview || results.tables?.length,
+    structure: results.data_structure || results.parsed_data_structure || results.data_structure_raw || results.tables?.length,
+    relations: (results.tables?.length > 1) || results.relations,
     insights: results.quality_report || results.discovery,
     metrics_plan: results.metrics_plan_dict,
     calculation_code: results.calculation_code,
@@ -20,6 +21,10 @@ export function sectionHasData(sectionId, results) {
 
 export function sectionTextContent(sectionId, results) {
   if (!results) return null
+
+  if (sectionId === 'relations') {
+    return results.relations_raw || null
+  }
 
   if (sectionId === 'insights') {
     const combined = results.insights_report_raw

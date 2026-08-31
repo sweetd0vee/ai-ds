@@ -15,6 +15,7 @@ interface JobStatusResponse {
   message: string        // Сообщение для UI
   error: string | null
   filename: string
+  filenames?: string[]
   graph_count: number
   analyst_model: string
   results: Results | null
@@ -31,9 +32,14 @@ interface JobStatusResponse {
 
 | Ключ | Тип | Этап появления | Описание |
 |------|-----|----------------|----------|
-| `preview` | `list[dict]` | preparing | Первые 20 строк |
+| `preview` | `list[dict]` | preparing | Первые 20 строк анализируемой таблицы |
 | `columns` | `list[str]` | preparing | Имена столбцов |
 | `shape` | `[int, int]` | preparing | [строки, столбцы] |
+| `tables` | `list[object]` | preparing | Исходные таблицы: id, name, preview, structure |
+| `table_count` | `int` | preparing | Число загруженных таблиц |
+| `relations` | `object` | preparing | Найденные join/union связи |
+| `join_plan` | `object` | preparing | Как собрана таблица для анализа |
+| `relations_raw` | `str` | preparing | Текст отчёта о связях |
 | `graph_count` | `int` | preparing | Запрошенное число графиков |
 | `data_structure_raw` | `str` | structure | Текстовое описание структуры |
 | `data_structure` | `object` | structure | JSON структуры |

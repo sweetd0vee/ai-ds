@@ -137,7 +137,11 @@ export default function HistoryModal({ open, onClose, onSelect, onDeleted }) {
                       >
                         <FileSpreadsheet size={20} className="history-item-icon" />
                         <div className="history-item-main">
-                          <strong title={item.filename}>{item.filename}</strong>
+                          <strong title={(item.filenames || [item.filename]).filter(Boolean).join(', ')}>
+                            {item.filenames?.length > 1
+                              ? `${item.filenames[0]} +${item.filenames.length - 1}`
+                              : item.filename}
+                          </strong>
                           <span className="history-item-meta">
                             {formatDateTime(item.created_at)}
                             {item.rows != null && item.cols != null && (

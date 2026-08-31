@@ -234,6 +234,36 @@ def format_hypotheses_text(hypotheses: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def append_auditor_hypothesis(existing: list[dict], payload: dict) -> tuple[list[dict], dict]:
+    """Добавляет ручную гипотезу аудитора в конец списка."""
+    items = [h for h in (existing or []) if isinstance(h, dict)]
+    next_id = max((int(h.get("id") or 0) for h in items), default=0) + 1
+    statement = str(payload.get("statement") or "").strip()
+    if not statement:
+        raise ValueError("Укажите формулировку гипотезы")
+
+    raw_item = {
+        "id": next_id,
+        "title": str(payload.get("title") or "").strip() or f"Гипотеза аудитора {next_id}",
+        "statement": statement,
+        "rationale": str(payload.get("rationale") or "").strip(),
+        "verification": str(payload.get("verification") or "").strip(),
+        "columns": payload.get("columns") or [],
+        "priority": payload.get("priority") or "medium",
+        "kind": "auditor",
+        "kind_label": "Ручная",
+        "source": "auditor",
+    }
+    normalized = _normalize_hypothesis(raw_item, next_id - 1)
+    if not normalized:
+        raise ValueError("Укажите формулировку гипотезы")
+    normalized["id"] = next_id
+    normalized["source"] = "auditor"
+    normalized["kind"] = "auditor"
+    normalized["kind_label"] = "Ручная"
+    return [*items, normalized], normalized
+
+
 def merge_hypotheses(python_hyps: list[dict], llm_hyps: list[dict] | None = None) -> list[dict]:
     """База — гипотезы Python (с цифрами); LLM только уточняет формулировки и может добавить новые."""
     from .scientific_discovery import KIND_LABELS

@@ -1,17 +1,20 @@
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 
 from ..config import JOBS_DIR, settings
+from ..core.loaders import ALLOWED_EXTS, MAX_UPLOAD_FILES
 from ..core.pipeline import run_analysis_pipeline
 from ..jobs import JobStore
 from ..core.sandbox import run_sandbox_code
 from ..models import (
     AppConfigResponse,
+    HypothesisCreateRequest,
     HypothesesExportRequest,
     JobCreateResponse,
     JobListItem,
@@ -25,6 +28,34 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 job_store = JobStore()
+
+
+def _display_filename(names: list[str]) -> str:
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return f"{names[0]} +{len(names) - 1}"
+
+
+def _safe_filename(name: str) -> str:
+    cleaned = re.sub(r"[^\w.\-]+", "_", Path(name).name, flags=re.UNICODE)
+    return (cleaned[:160] or "file").strip("._") or "file"
+
+
+def _collect_uploads(
+    files: list[UploadFile] | None,
+    file: UploadFile | None,
+) -> list[UploadFile]:
+    uploads: list[UploadFile] = []
+    seen: set[int] = set()
+    for item in list(files or []) + ([file] if file is not None else []):
+        if item is None or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if item.filename:
+            uploads.append(item)
+    return uploads
 
 
 @router.get("/health")
@@ -43,16 +74,21 @@ async def get_app_config():
 @router.post("/analyze", response_model=JobCreateResponse)
 async def start_analysis(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    files: list[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None),
     graph_count: int = Form(20),
     analyst_model: str | None = Form(None),
 ):
-    if not file.filename:
-        raise HTTPException(400, "Файл не указан")
+    uploads = _collect_uploads(files, file)
+    if not uploads:
+        raise HTTPException(400, "Файлы не указаны")
+    if len(uploads) > MAX_UPLOAD_FILES:
+        raise HTTPException(400, f"Не больше {MAX_UPLOAD_FILES} файлов за раз")
 
-    ext = Path(file.filename).suffix.lower()
-    if ext not in (".csv", ".xlsx"):
-        raise HTTPException(400, "Поддерживаются только .csv и .xlsx")
+    for item in uploads:
+        ext = Path(item.filename).suffix.lower()
+        if ext not in ALLOWED_EXTS:
+            raise HTTPException(400, "Поддерживаются только .csv и .xlsx")
 
     if graph_count not in (10, 15, 20, 30):
         raise HTTPException(400, "graph_count: 10, 15, 20 или 30")
@@ -61,20 +97,32 @@ async def start_analysis(
     if model not in settings.analyst_models:
         raise HTTPException(400, f"Недопустимая модель. Доступны: {', '.join(settings.analyst_models)}")
 
+    original_names = [item.filename for item in uploads]
+    display_name = _display_filename(original_names)
+
     try:
         JOBS_DIR.mkdir(parents=True, exist_ok=True)
-        job = job_store.create("", "", file.filename, graph_count=graph_count, analyst_model=model)
+        job = job_store.create("", "", display_name, graph_count=graph_count, analyst_model=model)
         job_dir = JOBS_DIR / job.id
         job_dir.mkdir(parents=True, exist_ok=True)
+        inputs_dir = job_dir / "inputs"
+        inputs_dir.mkdir(exist_ok=True)
 
-        input_path = job_dir / f"input{ext}"
-        content = await file.read()
-        input_path.write_bytes(content)
+        saved_paths: list[str] = []
+        for index, item in enumerate(uploads):
+            ext = Path(item.filename).suffix.lower()
+            dest = inputs_dir / f"{index:02d}_{_safe_filename(item.filename)}"
+            if dest.suffix.lower() != ext:
+                dest = dest.with_suffix(ext)
+            dest.write_bytes(await item.read())
+            saved_paths.append(str(dest))
 
         output_dir = job_dir / "output"
         output_dir.mkdir(exist_ok=True)
 
-        job.file_path = str(input_path)
+        job.file_path = saved_paths[0]
+        job.file_paths = saved_paths
+        job.filenames = original_names
         job.output_dir = str(output_dir)
         job_store.persist(job)
 
@@ -82,7 +130,8 @@ async def start_analysis(
 
         return JobCreateResponse(
             job_id=job.id,
-            filename=file.filename,
+            filename=display_name,
+            filenames=original_names,
             message="Анализ запущен",
             graph_count=graph_count,
         )
@@ -103,6 +152,7 @@ async def list_jobs():
             JobListItem(
                 job_id=job.id,
                 filename=job.filename,
+                filenames=job.filenames or ([job.filename] if job.filename else []),
                 status=job.status,
                 progress=job.progress,
                 graph_count=job.graph_count,
@@ -189,7 +239,7 @@ async def run_job_code(job_id: str, body: RunCodeRequest):
     if not job:
         raise HTTPException(404, "Задача не найдена")
 
-    if not job.file_path:
+    if not job.file_path and not job.file_paths:
         raise HTTPException(400, "Файл задачи не найден")
 
     results = job.results or {}
@@ -204,8 +254,33 @@ async def run_job_code(job_id: str, body: RunCodeRequest):
         job.file_path,
         datetime_candidates,
         metrics_plan,
+        file_paths=job.file_paths or None,
+        filenames=job.filenames or None,
+        analysis_path=job.analysis_path or None,
     )
     return RunCodeResponse(**payload)
+
+
+@router.post("/jobs/{job_id}/hypotheses", response_model=JobStatusResponse)
+async def add_hypothesis(job_id: str, body: HypothesisCreateRequest):
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(404, "Задача не найдена")
+    if job.status in ("running", "pending"):
+        raise HTTPException(409, "Дождитесь окончания анализа, затем добавьте гипотезу")
+
+    from ..core.hypotheses import append_auditor_hypothesis
+
+    existing = (job.results or {}).get("hypotheses") or []
+    try:
+        hypotheses, _created = append_auditor_hypothesis(existing, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    updated = await job_store.patch_results(job_id, {"hypotheses": hypotheses})
+    if not updated:
+        raise HTTPException(404, "Задача не найдена")
+    return JobStatusResponse(**job_store.to_dict(updated))
 
 
 @router.post("/jobs/{job_id}/hypotheses/export")
@@ -274,6 +349,7 @@ async def download_file(job_id: str, filename: str):
         "quality_report.txt", "correlations.txt",
         "quality_insights.xlsx",
         "data_structure.xlsx",
+        "relations.txt",
     }
     if filename not in allowed:
         raise HTTPException(400, "Файл недоступен для скачивания")

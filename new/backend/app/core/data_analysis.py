@@ -459,38 +459,56 @@ def format_metrics_summary(metrics_results: dict) -> str:
     return "\n".join(lines) if lines else "Метрики не рассчитаны."
 
 
-def format_calculation_code_reference(metrics_plan: dict[str, list[str]]) -> str:
+def format_calculation_code_reference(
+    metrics_plan: dict[str, list[str]],
+    table_names: list[str] | None = None,
+) -> str:
     """Стартовый код для песочницы на вкладке «Код»."""
     cols = len(metrics_plan)
     first_col = next(iter(metrics_plan), "column")
-    return f"""# Песочница Python — данные и план метрик уже загружены на сервере
-# Доступно: df, pd, np, metrics_plan ({cols} столбцов)
-# Функции: compute_metrics(), format_metrics_summary(), format_metrics_results()
-
-rows, cols_count = df.shape
-print(f"Датасет: {{rows}} строк × {{cols_count}} столбцов")
-
-missing = df.isna().sum()
-cols_with_na = missing[missing > 0]
-if not cols_with_na.empty:
-    print(f"Столбцов с пропусками: {{len(cols_with_na)}}")
-    for col, cnt in cols_with_na.nlargest(5).items():
-        print(f"  {{col}}: {{cnt}} ({{cnt / rows:.1%}})")
-else:
-    print("Пропусков нет")
-
-print()
-print("=" * 60)
-print("Метрики по плану")
-print("=" * 60)
-
-metrics_results = compute_metrics(df, metrics_plan)
-print(format_metrics_summary(metrics_results))
-
-# Полный JSON (раскомментируйте при необходимости):
-# print(format_metrics_results(metrics_results))
-
-# Дополнительные эксперименты:
-# print(df.describe(include="all").T)
-# print(df["{first_col}"].value_counts().head(10))
+    names = table_names or []
+    header_extra = ""
+    tables_block = ""
+    if len(names) > 1:
+        header_extra = (
+            f"# Также: dfs — словарь из {len(names)} таблиц: {', '.join(names)}\n"
+            "# df — объединённая таблица (join/union) для анализа\n"
+        )
+        tables_block = """
+print("Исходные таблицы:")
+for name, table in dfs.items():
+    print(f"  {name}: {table.shape[0]} × {table.shape[1]}")
 """
+    return (
+        "# Песочница Python — данные и план метрик уже загружены на сервере\n"
+        f"# Доступно: df, pd, np, metrics_plan ({cols} столбцов)\n"
+        f"{header_extra}"
+        "# Функции: compute_metrics(), format_metrics_summary(), format_metrics_results()\n"
+        "\n"
+        "rows, cols_count = df.shape\n"
+        'print(f"Датасет: {rows} строк × {cols_count} столбцов")\n'
+        f"{tables_block}\n"
+        "missing = df.isna().sum()\n"
+        "cols_with_na = missing[missing > 0]\n"
+        "if not cols_with_na.empty:\n"
+        '    print(f"Столбцов с пропусками: {len(cols_with_na)}")\n'
+        "    for col, cnt in cols_with_na.nlargest(5).items():\n"
+        '        print(f"  {col}: {cnt} ({cnt / rows:.1%})")\n'
+        "else:\n"
+        '    print("Пропусков нет")\n'
+        "\n"
+        "print()\n"
+        'print("=" * 60)\n'
+        'print("Метрики по плану")\n'
+        'print("=" * 60)\n'
+        "\n"
+        "metrics_results = compute_metrics(df, metrics_plan)\n"
+        "print(format_metrics_summary(metrics_results))\n"
+        "\n"
+        "# Полный JSON (раскомментируйте при необходимости):\n"
+        "# print(format_metrics_results(metrics_results))\n"
+        "\n"
+        "# Дополнительные эксперименты:\n"
+        '# print(df.describe(include="all").T)\n'
+        f'# print(df["{first_col}"].value_counts().head(10))\n'
+    )

@@ -3,7 +3,7 @@ import json
 import logging
 import shutil
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +30,9 @@ class Job:
     results: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    file_paths: list[str] = field(default_factory=list)
+    filenames: list[str] = field(default_factory=list)
+    analysis_path: str = ""
 
 
 class JobStore:
@@ -54,15 +57,27 @@ class JobStore:
         except Exception:
             logger.exception("Failed to save job %s", job.id)
 
+    @staticmethod
+    def _coerce_job_data(data: dict) -> dict:
+        data.setdefault("analyst_model", "qwen3.8:27b")
+        if not data.get("file_paths") and data.get("file_path"):
+            data["file_paths"] = [data["file_path"]]
+        if not data.get("filenames") and data.get("filename"):
+            data["filenames"] = [data["filename"]]
+        data.setdefault("file_paths", [])
+        data.setdefault("filenames", [])
+        data.setdefault("analysis_path", "")
+        if "results" in data:
+            data["results"] = JobStore._normalize_results(data.get("results")) or {}
+        allowed = {item.name for item in fields(Job)}
+        return {key: value for key, value in data.items() if key in allowed}
+
     def _load_from_disk(self, job_id: str) -> Job | None:
         path = self._state_path(job_id)
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                data.setdefault("analyst_model", "qwen3.8:27b")
-                if "results" in data:
-                    data["results"] = JobStore._normalize_results(data.get("results")) or {}
-                return Job(**data)
+                return Job(**JobStore._coerce_job_data(data))
             except Exception:
                 logger.exception("Failed to load job state %s", job_id)
 
@@ -70,17 +85,25 @@ class JobStore:
         if not job_dir.is_dir():
             return None
 
-        input_files = sorted(job_dir.glob("input.*"))
+        inputs_dir = job_dir / "inputs"
+        if inputs_dir.is_dir():
+            input_files = sorted(p for p in inputs_dir.iterdir() if p.is_file())
+        else:
+            input_files = sorted(job_dir.glob("input.*"))
         if not input_files:
             return None
 
         output_dir = job_dir / "output"
         output_dir.mkdir(exist_ok=True)
+        paths = [str(p) for p in input_files]
+        names = [p.name for p in input_files]
         return Job(
             id=job_id,
-            file_path=str(input_files[0]),
+            file_path=paths[0],
             output_dir=str(output_dir),
-            filename=input_files[0].name,
+            filename=names[0] if len(names) == 1 else f"{names[0]} +{len(names) - 1}",
+            file_paths=paths,
+            filenames=names,
             status="unknown",
             message="Восстановлено с диска",
         )
@@ -102,8 +125,13 @@ class JobStore:
         filename: str,
         graph_count: int = 20,
         analyst_model: str = "qwen3.8:27b",
+        file_paths: list[str] | None = None,
+        filenames: list[str] | None = None,
+        analysis_path: str = "",
     ) -> Job:
         job_id = str(uuid.uuid4())
+        paths = list(file_paths or ([file_path] if file_path else []))
+        names = list(filenames or ([filename] if filename else []))
         job = Job(
             id=job_id,
             file_path=file_path,
@@ -111,6 +139,9 @@ class JobStore:
             filename=filename,
             graph_count=graph_count,
             analyst_model=analyst_model,
+            file_paths=paths,
+            filenames=names,
+            analysis_path=analysis_path,
         )
         self._jobs[job_id] = job
         self._save_to_disk(job)
@@ -201,6 +232,7 @@ class JobStore:
             "message": job.message,
             "error": job.error,
             "filename": job.filename,
+            "filenames": job.filenames or ([job.filename] if job.filename else []),
             "graph_count": job.graph_count,
             "analyst_model": job.analyst_model,
             "results": JobStore._enrich_results(job.results or None),
@@ -255,6 +287,21 @@ class JobStore:
             job.updated_at = datetime.utcnow().isoformat()
             self._save_to_disk(job)
         await self._notify(job_id)
+
+    async def patch_results(self, job_id: str, partial: dict) -> Job | None:
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                job = self._load_from_disk(job_id)
+                if job:
+                    self._jobs[job_id] = job
+            if not job:
+                return None
+            job.results = {**(job.results or {}), **partial}
+            job.updated_at = datetime.utcnow().isoformat()
+            self._save_to_disk(job)
+        await self._notify(job_id)
+        return job
 
     def persist(self, job: Job):
         self._jobs[job.id] = job

@@ -1,13 +1,26 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { FileSpreadsheet, Upload, X } from 'lucide-react'
+import { FileSpreadsheet, Plus, Upload, X } from 'lucide-react'
 import { GRAPH_OPTIONS } from '../constants'
 import { formatFileSize } from '../utils/format'
 
+function fileKey(file) {
+  return `${file.name}:${file.size}:${file.lastModified || 0}`
+}
+
 export default function UploadSection({
-  file, dragOver, graphCount, loading, compact,
-  onFile, onDrop, onDragOver, onDragLeave,
-  onAnalyze, onClear, onGraphCount, inputRef,
+  files = [], dragOver, graphCount, loading, compact,
+  onFiles, onDrop, onDragOver, onDragLeave,
+  onAnalyze, onClear, onRemoveFile, onGraphCount, inputRef,
 }) {
+  const fromHistory = files.some((f) => f.fromHistory)
+  const hasFiles = files.length > 0
+  const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0)
+
+  const openPicker = () => {
+    if (fromHistory || loading) return
+    inputRef.current?.click()
+  }
+
   return (
     <motion.section className="upload-panel" layout>
       {!compact && (
@@ -19,7 +32,7 @@ export default function UploadSection({
         >
           <h1 className="upload-hero-title">Электронный Датасаентист</h1>
           <p className="upload-hero-subtitle">
-            CSV или Excel — перетащите файл или выберите вручную
+            CSV или Excel — можно сразу несколько таблиц, связи между ними найдутся автоматически
           </p>
         </motion.div>
       )}
@@ -32,36 +45,55 @@ export default function UploadSection({
       )}
 
       <div
-        className={`dropzone ${compact ? 'dropzone--compact' : 'dropzone--hero'} ${dragOver ? 'dragover' : ''} ${file ? 'has-file' : ''}`}
+        className={`dropzone ${compact ? 'dropzone--compact' : 'dropzone--hero'} ${dragOver ? 'dragover' : ''} ${hasFiles ? 'has-file' : ''}`}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        onClick={() => !file && inputRef.current?.click()}
+        onClick={() => !hasFiles && openPicker()}
       >
         <input
           ref={inputRef}
           type="file"
           accept=".csv,.xlsx"
-          onChange={(e) => onFile(e.target.files[0])}
+          multiple
+          onChange={(e) => {
+            onFiles(e.target.files)
+            e.target.value = ''
+          }}
         />
         <AnimatePresence mode="wait">
-          {file ? (
+          {hasFiles ? (
             <motion.div
-              key="file"
-              className="file-info"
+              key="files"
+              className="file-list"
               onClick={(e) => e.stopPropagation()}
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
             >
-              <FileSpreadsheet size={compact ? 28 : 40} className="file-icon" />
-              <div className="file-meta">
-                <strong title={file.name}>{file.name}</strong>
-                <span>{file.fromHistory ? 'из истории' : formatFileSize(file.size)}</span>
-              </div>
-              {!loading && (
-                <button className="icon-btn" onClick={onClear} title="Убрать файл" type="button">
-                  <X size={18} />
+              {files.map((file, index) => (
+                <div key={fileKey(file)} className="file-info">
+                  <FileSpreadsheet size={compact ? 22 : 32} className="file-icon" />
+                  <div className="file-meta">
+                    <strong title={file.name}>{file.name}</strong>
+                    <span>{file.fromHistory ? 'из истории' : formatFileSize(file.size)}</span>
+                  </div>
+                  {!loading && !fromHistory && (
+                    <button
+                      className="icon-btn"
+                      onClick={() => onRemoveFile(index)}
+                      title="Убрать файл"
+                      type="button"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {!fromHistory && !loading && (
+                <button type="button" className="file-add-btn" onClick={openPicker}>
+                  <Plus size={16} />
+                  Добавить таблицы
                 </button>
               )}
             </motion.div>
@@ -74,14 +106,21 @@ export default function UploadSection({
               exit={{ opacity: 0 }}
             >
               <Upload size={compact ? 32 : 56} className="dropzone-icon" />
-              {!compact && <p className="dropzone-title">Перетащите файл сюда</p>}
+              {!compact && <p className="dropzone-title">Перетащите файлы сюда</p>}
               <p className="dropzone-hint">
-                {compact ? 'Файл · .csv, .xlsx' : 'или нажмите для выбора · .csv, .xlsx'}
+                {compact ? 'Файлы · .csv, .xlsx' : 'один или несколько · .csv, .xlsx'}
               </p>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
+      {hasFiles && !fromHistory && !compact && (
+        <p className="upload-file-count">
+          {files.length} {files.length === 1 ? 'файл' : files.length < 5 ? 'файла' : 'файлов'}
+          {totalSize ? ` · ${formatFileSize(totalSize)}` : ''}
+        </p>
+      )}
 
       <div className={`options-row ${compact ? 'options-row--compact' : ''}`}>
         <label className="option-label">
@@ -100,10 +139,10 @@ export default function UploadSection({
 
       <motion.button
         className={`btn-primary ${compact ? 'btn-primary--compact' : 'btn-primary--hero'}`}
-        disabled={!file || loading || file.fromHistory}
+        disabled={!hasFiles || loading || fromHistory}
         onClick={onAnalyze}
-        whileHover={{ scale: file && !loading ? 1.02 : 1 }}
-        whileTap={{ scale: file && !loading ? 0.98 : 1 }}
+        whileHover={{ scale: hasFiles && !loading ? 1.02 : 1 }}
+        whileTap={{ scale: hasFiles && !loading ? 0.98 : 1 }}
         layout
       >
         {loading ? 'Анализ…' : compact ? 'Запустить' : 'Запустить анализ'}
@@ -116,8 +155,8 @@ export default function UploadSection({
           animate={{ opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
-          <li>Структура и качество данных</li>
-          <li>Метрики и корреляции</li>
+          <li>Несколько таблиц и связи между ними</li>
+          <li>Структура, качество и корреляции</li>
           <li>Графики и итоговый отчёт</li>
         </motion.ul>
       )}

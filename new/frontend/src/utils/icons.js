@@ -1,11 +1,12 @@
 import {
-  BarChart3, Brain, Calculator, CheckCircle2, Database, FileText, Hash,
+  BarChart3, Brain, Calculator, CheckCircle2, Database, FileText, GitMerge, Hash,
   Image, Layers, Lightbulb, ListChecks, Palette, ScanSearch, Shield, Sparkles, Table2, Terminal,
 } from 'lucide-react'
 
 export const RESULT_ICONS = {
   table: Table2,
   layers: Layers,
+  'git-merge': GitMerge,
   shield: Shield,
   list: ListChecks,
   terminal: Terminal,

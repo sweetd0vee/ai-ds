@@ -24,9 +24,10 @@ export async function fetchConfig() {
   return res.json()
 }
 
-export async function startAnalysis(file, graphCount = 20, analystModel) {
+export async function startAnalysis(files, graphCount = 20, analystModel) {
+  const list = Array.isArray(files) ? files : [files]
   const formData = new FormData()
-  formData.append('file', file)
+  list.forEach((file) => formData.append('files', file))
   formData.append('graph_count', String(graphCount))
   if (analystModel) formData.append('analyst_model', analystModel)
 
@@ -123,6 +124,20 @@ export async function downloadJobFile(jobId, filename) {
     throw new Error(parseApiDetail(err.detail, `Не удалось скачать файл (${res.status})`))
   }
   triggerBlobDownload(await res.blob(), filename)
+}
+
+export async function addHypothesis(jobId, payload) {
+  if (!jobId) throw new Error('Задача не найдена')
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/hypotheses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(parseApiDetail(data.detail, 'Не удалось добавить гипотезу'))
+  }
+  return data
 }
 
 export async function exportHypotheses(jobId, ids, format = 'xlsx') {

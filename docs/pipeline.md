@@ -44,13 +44,14 @@ flowchart TD
 
 **Цель:** загрузить таблицу и отдать превью в UI.
 
-1. `load_dataframe(file_path)` — CSV (utf-8/latin1/cp1251) или XLSX (openpyxl).
-2. Проверка: DataFrame не пустой.
-3. В `state`:
-   - `preview` — первые `PREVIEW_ROWS` (20) строк как список dict;
-   - `columns` — имена столбцов;
-   - `shape` — `[rows, cols]`;
-   - `graph_count` — из запроса пользователя.
+1. `load_tables(file_entries)` — CSV и XLSX (каждый лист Excel — отдельная таблица).
+2. `detect_relations` — поиск ключей join (имена + пересечение значений) и одинаковых схем (union).
+3. `build_analysis_frame` — left join по найденным ключам или concat при одинаковой схеме; иначе самая большая таблица.
+4. Проверка: итоговый DataFrame не пустой.
+5. В `state`:
+   - `preview` / `columns` / `shape` — объединённая таблица для анализа;
+   - `tables` — превью и метаданные каждой исходной таблицы;
+   - `relations` / `join_plan` / `relations_raw` — найденные связи.
 
 ---
 

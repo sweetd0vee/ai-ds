@@ -18,41 +18,79 @@ def build_final_report(
     correlations_raw: str = "",
     hypotheses: list[dict] | None = None,
     discovery_raw: str = "",
+    relations_raw: str = "",
+    table_count: int = 1,
 ) -> str:
     rows, cols = int(shape[0]), int(shape[1])
     n_plots = len(plot_files)
 
     metrics_brief = _metrics_highlights(metrics_results_raw)
 
+    data_lines = [
+        "1. ОБЩАЯ ХАРАКТЕРИСТИКА ДАННЫХ",
+        f"Файл: {filename}",
+    ]
+    if table_count > 1:
+        data_lines.append(f"Таблиц: {table_count}.")
+    data_lines.append(f"Размер анализируемой выборки: {rows} строк × {cols} столбцов.")
+    data_lines.append(f"Визуализация: построено {n_plots} графиков (запрошено {graph_count}).")
+
     sections = [
         "ИТОГОВЫЙ АНАЛИТИЧЕСКИЙ ОТЧЁТ",
         "=" * 40,
         "",
-        "1. ОБЩАЯ ХАРАКТЕРИСТИКА ДАННЫХ",
-        f"Файл: {filename}",
-        f"Размер: {rows} строк × {cols} столбцов.",
-        f"Визуализация: построено {n_plots} графиков (запрошено {graph_count}).",
+        *data_lines,
         "",
-        "2. КАЧЕСТВО ДАННЫХ",
-        _section_excerpt(quality_report_raw, "---JSON---"),
-        "",
-        "3. ИНСАЙТЫ, АНОМАЛИИ И ОСНОВНАЯ ОБЛАСТЬ",
-        _section_excerpt(discovery_raw, "---JSON---", limit=4000) if discovery_raw else "  Инсайты недоступны.",
-        "",
-        "4. СВЯЗИ МЕЖДУ СТОЛБЦАМИ",
-        _section_excerpt(correlations_raw, "---JSON---"),
-        "",
-        "5. КЛЮЧЕВЫЕ НАБЛЮДЕНИЯ ПО МЕТРИКАМ",
-        metrics_brief,
-        "",
-        "6. ИНТЕРПРЕТАЦИЯ АНАЛИЗА",
-        analysis_summary.strip(),
-        "",
-        "7. ГИПОТЕЗЫ ДЛЯ ПРОВЕРКИ",
-        format_hypotheses_text(hypotheses or []),
-        "",
-        "8. ВИЗУАЛИЗАЦИИ",
     ]
+    if relations_raw:
+        sections.extend([
+            "2. СВЯЗИ МЕЖДУ ТАБЛИЦАМИ",
+            _section_excerpt(relations_raw, "---JSON---", limit=2500),
+            "",
+            "3. КАЧЕСТВО ДАННЫХ",
+            _section_excerpt(quality_report_raw, "---JSON---"),
+            "",
+            "4. ИНСАЙТЫ, АНОМАЛИИ И ОСНОВНАЯ ОБЛАСТЬ",
+            _section_excerpt(discovery_raw, "---JSON---", limit=4000) if discovery_raw else "  Инсайты недоступны.",
+            "",
+            "5. СВЯЗИ МЕЖДУ СТОЛБЦАМИ",
+            _section_excerpt(correlations_raw, "---JSON---"),
+            "",
+            "6. КЛЮЧЕВЫЕ НАБЛЮДЕНИЯ ПО МЕТРИКАМ",
+            metrics_brief,
+            "",
+            "7. ИНТЕРПРЕТАЦИЯ АНАЛИЗА",
+            analysis_summary.strip(),
+            "",
+            "8. ГИПОТЕЗЫ ДЛЯ ПРОВЕРКИ",
+            format_hypotheses_text(hypotheses or []),
+            "",
+            "9. ВИЗУАЛИЗАЦИИ",
+        ])
+        rec_n = 10
+    else:
+        sections.extend([
+            "2. КАЧЕСТВО ДАННЫХ",
+            _section_excerpt(quality_report_raw, "---JSON---"),
+            "",
+            "3. ИНСАЙТЫ, АНОМАЛИИ И ОСНОВНАЯ ОБЛАСТЬ",
+            _section_excerpt(discovery_raw, "---JSON---", limit=4000) if discovery_raw else "  Инсайты недоступны.",
+            "",
+            "4. СВЯЗИ МЕЖДУ СТОЛБЦАМИ",
+            _section_excerpt(correlations_raw, "---JSON---"),
+            "",
+            "5. КЛЮЧЕВЫЕ НАБЛЮДЕНИЯ ПО МЕТРИКАМ",
+            metrics_brief,
+            "",
+            "6. ИНТЕРПРЕТАЦИЯ АНАЛИЗА",
+            analysis_summary.strip(),
+            "",
+            "7. ГИПОТЕЗЫ ДЛЯ ПРОВЕРКИ",
+            format_hypotheses_text(hypotheses or []),
+            "",
+            "8. ВИЗУАЛИЗАЦИИ",
+        ])
+        rec_n = 9
 
     if plot_files:
         sections.extend(f"  • {name}" for name in plot_files)
@@ -61,7 +99,7 @@ def build_final_report(
 
     sections.extend([
         "",
-        "9. РЕКОМЕНДАЦИИ",
+        f"{rec_n}. РЕКОМЕНДАЦИИ",
         _recommendations(metrics_results_raw, rows, cols, quality_report_raw),
         "",
         "— Отчёт сформирован автоматически на основе расчётных метрик и анализа.",

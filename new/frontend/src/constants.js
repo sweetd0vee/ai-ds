@@ -16,6 +16,7 @@ export const PIPELINE_STEPS = [
 export const RESULT_SECTIONS = [
   { id: 'preview', label: 'Данные', icon: 'table' },
   { id: 'structure', label: 'Структура', icon: 'layers' },
+  { id: 'relations', label: 'Связи таблиц', icon: 'git-merge' },
   { id: 'insights', label: 'Инсайты', icon: 'shield' },
   { id: 'metrics_plan', label: 'Метрики', icon: 'list' },
   { id: 'calculation_code', label: 'Код', icon: 'terminal' },

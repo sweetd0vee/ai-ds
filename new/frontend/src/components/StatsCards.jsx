@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
-import { BarChart3, Columns3, Rows3, Timer } from 'lucide-react'
+import { BarChart3, Columns3, Layers, Rows3, Timer } from 'lucide-react'
 
-export default function StatsCards({ shape, progress, graphCount, elapsed }) {
+export default function StatsCards({ shape, tableCount, progress, graphCount, elapsed }) {
   const cards = [
     { icon: Rows3, label: 'Строк', value: shape?.[0] ?? '—' },
     { icon: Columns3, label: 'Столбцов', value: shape?.[1] ?? '—' },
@@ -9,8 +9,14 @@ export default function StatsCards({ shape, progress, graphCount, elapsed }) {
     { icon: Timer, label: 'Прогресс', value: progress != null ? `${progress}%` : '—' },
   ]
 
+  if (tableCount > 1) {
+    cards.unshift({ icon: Layers, label: 'Таблиц', value: tableCount })
+    cards.splice(3, 1)
+  }
+
   if (elapsed) {
-    cards[3] = { icon: Timer, label: 'Время', value: elapsed }
+    const idx = cards.findIndex((c) => c.label === 'Прогресс')
+    if (idx >= 0) cards[idx] = { icon: Timer, label: 'Время', value: elapsed }
   }
 
   return (

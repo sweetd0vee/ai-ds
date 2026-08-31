@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import pickle
 from pathlib import Path
 
 from .analysis_export import build_analysis_docx
@@ -27,10 +28,16 @@ from .data_insights import (
 )
 from .plots_export import ensure_plots_report_docx
 from .quality_export import build_quality_xlsx, format_insights_report
-from .loaders import load_dataframe
+from .loaders import load_dataframe, load_tables, tables_meta
 from .llm import chain_invoke, get_llm_analyst
 from .preprocess import preprocess_dates_based_on_llm
 from .prompts import DATA_ANALYZE, DATA_HYPOTHESES
+from .relations import (
+    build_analysis_frame,
+    detect_relations,
+    format_relations_report,
+    relations_hypotheses,
+)
 from .reports import build_final_report
 from .structure_export import build_structure_xlsx
 from .visualization import generate_visualizations
@@ -98,6 +105,38 @@ async def _save_final_report(
     )
 
 
+def _job_file_entries(job) -> list[tuple[str, str]]:
+    paths = list(job.file_paths or [])
+    if not paths and job.file_path:
+        paths = [job.file_path]
+    names = list(job.filenames or [])
+    entries = []
+    for i, path in enumerate(paths):
+        name = names[i] if i < len(names) else Path(path).name
+        entries.append((path, name))
+    return entries
+
+
+def _attach_table_structures(table_summaries: list[dict], tables: list[dict]) -> list[dict]:
+    by_id = {t["id"]: t for t in tables}
+    result = []
+    for meta in table_summaries:
+        item = dict(meta)
+        table = by_id.get(meta["id"])
+        if table is not None:
+            parsed, raw = analyze_data_structure(table["df"])
+            item["structure"] = parsed
+            item["structure_raw"] = raw
+        result.append(item)
+    return result
+
+
+def _save_analysis_frame(path: Path, df):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        pickle.dump(df, fh, protocol=4)
+
+
 async def run_analysis_pipeline(job_id: str, store: JobStore):
     job = store.get(job_id)
     file_path = job.file_path
@@ -109,18 +148,66 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
     analyst = get_llm_analyst(job.analyst_model)
 
     try:
-        await store.update(job_id, "preparing", 5, "Загрузка файла")
-        df = await asyncio.to_thread(load_dataframe, file_path)
+        entries = _job_file_entries(job)
+        n_files = len(entries)
+        await store.update(
+            job_id, "preparing", 5,
+            "Загрузка файлов" if n_files > 1 else "Загрузка файла",
+        )
+        if entries:
+            tables = await asyncio.to_thread(load_tables, entries)
+        else:
+            df_single = await asyncio.to_thread(load_dataframe, file_path)
+            tables = [{
+                "id": "data",
+                "name": job.filename or Path(file_path).name,
+                "filename": job.filename or Path(file_path).name,
+                "sheet": None,
+                "path": file_path,
+                "rows": int(df_single.shape[0]),
+                "cols": int(df_single.shape[1]),
+                "columns": [str(c) for c in df_single.columns],
+                "df": df_single,
+            }]
+
+        table_summaries = tables_meta(tables, PREVIEW_ROWS)
+        relations = await asyncio.to_thread(detect_relations, tables)
+        if len(tables) > 1:
+            await store.update(
+                job_id, "preparing", 8,
+                f"Поиск связей между {len(tables)} таблицами",
+                partial={
+                    "tables": table_summaries,
+                    "table_count": len(tables),
+                    "relations": relations,
+                },
+            )
+
+        df, join_plan = await asyncio.to_thread(build_analysis_frame, tables, relations)
         if df is None or df.empty:
             raise ValueError("Не удалось загрузить данные или файл пуст")
 
+        analysis_path = output_dir.parent / "analysis_df.pkl"
+        await asyncio.to_thread(_save_analysis_frame, analysis_path, df)
+        job.analysis_path = str(analysis_path)
+        store.persist(job)
+
+        relations_raw = format_relations_report(relations, join_plan)
         state["preview"] = df.head(PREVIEW_ROWS).fillna("").astype(str).to_dict(orient="records")
-        state["columns"] = list(df.columns)
+        state["columns"] = [str(c) for c in df.columns]
         state["shape"] = list(df.shape)
         state["graph_count"] = graph_count
+        state["tables"] = table_summaries
+        state["table_count"] = len(tables)
+        state["relations"] = relations
+        state["join_plan"] = join_plan
+        state["relations_raw"] = relations_raw
+        state["analysis_source"] = join_plan.get("mode")
+        await asyncio.to_thread(_save_text, output_dir / "relations.txt", relations_raw)
         await store.update(
-            job_id, "preparing", 10, "Данные загружены",
-            partial={"preview": state["preview"], "shape": state["shape"], "columns": state["columns"]},
+            job_id, "preparing", 10,
+            f"Загружено таблиц: {len(tables)}" if len(tables) > 1 else "Данные загружены",
+            partial=state,
         )
 
         await store.update(job_id, "structure_analysis", 18, "Анализ структуры данных (Python)")
@@ -128,9 +215,11 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         if not parsed_structure.get("columns"):
             raise ValueError("Не удалось определить структуру данных")
 
+        table_summaries = await asyncio.to_thread(_attach_table_structures, table_summaries, tables)
         state.update({
             "data_structure_raw": structure_raw,
             "data_structure": parsed_structure,
+            "tables": table_summaries,
         })
         await asyncio.to_thread(
             build_structure_xlsx,
@@ -152,6 +241,8 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         quality_report_raw = format_quality_report(quality_report)
         correlations_raw = format_correlations(correlations)
         insights_report_raw = format_insights_report(quality_report, correlations)
+        if relations_raw and len(tables) > 1:
+            insights_report_raw = relations_raw + "\n\n" + insights_report_raw
         state.update({
             "quality_report": quality_report,
             "quality_report_raw": quality_report_raw,
@@ -178,9 +269,26 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         discovery = await asyncio.to_thread(
             discover_insights, df_processed, parsed_structure, correlations
         )
+        if len(tables) > 1 and relations.get("summary"):
+            highlights = list(discovery.get("highlights") or [])
+            highlights.insert(0, {
+                "kind": "table_relation",
+                "severity": "high" if relations.get("join_links") else "medium",
+                "title": "Связи между таблицами",
+                "detail": relations["summary"],
+            })
+            discovery["highlights"] = highlights[:16]
+            kind_labels = dict(discovery.get("kind_labels") or {})
+            kind_labels["table_relation"] = "Связь таблиц"
+            discovery["kind_labels"] = kind_labels
         discovery_brief = format_discovery_brief(discovery)
+        if relations_raw and len(tables) > 1:
+            discovery_brief = relations_raw + "\n\n" + discovery_brief
         discovery_raw = format_discovery_report(discovery)
-        python_hypotheses = discovery.get("hypotheses") or []
+        rel_hyps = relations_hypotheses(relations, join_plan) if len(tables) > 1 else []
+        python_hypotheses = rel_hyps + (discovery.get("hypotheses") or [])
+        for index, item in enumerate(python_hypotheses, 1):
+            item["id"] = index
         state.update({
             "discovery": discovery,
             "discovery_brief": discovery_brief,
@@ -215,7 +323,10 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
         state["metrics_plan_dict"] = metrics_plan_dict
         await store.update(job_id, "metrics_plan", 38, "План метрик готов", partial=state)
 
-        calculation_code = format_calculation_code_reference(metrics_plan_dict)
+        calculation_code = format_calculation_code_reference(
+            metrics_plan_dict,
+            table_names=[t["id"] for t in tables],
+        )
         state["calculation_code"] = calculation_code
         await asyncio.to_thread(
             _save_text,
@@ -241,6 +352,7 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
                     "discovery_brief": _truncate(discovery_brief, 7000),
                     "quality_report_raw": _truncate(quality_report_raw, 2500),
                     "correlations_raw": _truncate(correlations_raw, 2500),
+                    "relations_brief": _truncate(relations_raw if len(tables) > 1 else "Одна таблица.", 2500),
                 },
             )
         except Exception:
@@ -347,6 +459,8 @@ async def run_analysis_pipeline(job_id: str, store: JobStore):
             correlations_raw,
             hypotheses,
             discovery_raw,
+            relations_raw=relations_raw if len(tables) > 1 else "",
+            table_count=len(tables),
         )
         state["final_report"] = final_report
         await store.update(job_id, "final_report", 92, "Сохранение отчёта", partial=state)

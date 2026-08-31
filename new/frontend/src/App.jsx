@@ -17,7 +17,7 @@ import './App.css'
 const shellTransition = { type: 'spring', stiffness: 280, damping: 32, mass: 0.9 }
 
 export default function App() {
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
   const [dragOver, setDragOver] = useState(false)
   const [graphCount, setGraphCount] = useState(20)
   const [jobId, setJobId] = useState(null)
@@ -61,14 +61,26 @@ export default function App() {
     return () => clearInterval(timerRef.current)
   }, [loading])
 
-  const handleFile = useCallback((f) => {
-    if (!f) return
-    const ext = f.name.split('.').pop()?.toLowerCase()
-    if (!['csv', 'xlsx'].includes(ext)) {
-      setError('Поддерживаются только .csv и .xlsx')
-      return
+  const handleFiles = useCallback((incoming) => {
+    const list = Array.from(incoming || []).filter(Boolean)
+    if (!list.length) return
+
+    const valid = []
+    for (const f of list) {
+      const ext = f.name.split('.').pop()?.toLowerCase()
+      if (!['csv', 'xlsx'].includes(ext)) {
+        setError('Поддерживаются только .csv и .xlsx')
+        continue
+      }
+      valid.push(f)
     }
-    setFile(f)
+    if (!valid.length) return
+
+    setFiles((prev) => {
+      const map = new Map(prev.filter((f) => !f.fromHistory).map((f) => [`${f.name}:${f.size}`, f]))
+      for (const f of valid) map.set(`${f.name}:${f.size}`, f)
+      return [...map.values()].slice(0, 10)
+    })
     setError(null)
     setJobId(null)
     setElapsed(0)
@@ -78,11 +90,15 @@ export default function App() {
   const onDrop = useCallback((e) => {
     e.preventDefault()
     setDragOver(false)
-    handleFile(e.dataTransfer.files[0])
-  }, [handleFile])
+    handleFiles(e.dataTransfer.files)
+  }, [handleFiles])
+
+  const handleRemoveFile = useCallback((index) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index))
+  }, [])
 
   const handleClearFile = useCallback(() => {
-    setFile(null)
+    setFiles([])
     setJobId(null)
     setElapsed(0)
     setActiveSection('preview')
@@ -98,7 +114,8 @@ export default function App() {
     setError(null)
     setActiveSection('preview')
     setGraphCount(item.graph_count)
-    setFile({ name: item.filename, size: 0, fromHistory: true })
+    const names = item.filenames?.length ? item.filenames : [item.filename]
+    setFiles(names.filter(Boolean).map((name) => ({ name, size: 0, fromHistory: true })))
 
     try {
       const data = await getJobStatus(item.job_id)
@@ -121,13 +138,13 @@ export default function App() {
   }, [handleClearFile, jobId])
 
   const onAnalyze = async () => {
-    if (!file || file.fromHistory) return
+    if (!files.length || files.some((f) => f.fromHistory)) return
     setLoading(true)
     setError(null)
     setElapsed(0)
     setActiveSection('preview')
     try {
-      const res = await startAnalysis(file, graphCount, settings.analystModel)
+      const res = await startAnalysis(files, graphCount, settings.analystModel)
       setJobId(res.job_id)
       startStream(res.job_id)
     } catch (e) {
@@ -140,16 +157,17 @@ export default function App() {
 
   const uploadProps = {
     compact: isAnalysisMode,
-    file,
+    files,
     dragOver,
     graphCount,
     loading,
-    onFile: handleFile,
+    onFiles: handleFiles,
     onDrop,
     onDragOver: (e) => { e.preventDefault(); setDragOver(true) },
     onDragLeave: () => setDragOver(false),
     onAnalyze,
     onClear: handleClearFile,
+    onRemoveFile: handleRemoveFile,
     onGraphCount: setGraphCount,
     inputRef,
   }
@@ -224,6 +242,7 @@ export default function App() {
 
                     <StatsCards
                       shape={results?.shape}
+                      tableCount={results?.table_count || results?.tables?.length}
                       progress={job.progress}
                       graphCount={job.graph_count}
                       elapsed={loading || job.status === 'completed' ? formatElapsed(elapsed) : null}
@@ -247,6 +266,7 @@ export default function App() {
                   activeSection={activeSection}
                   onSection={setActiveSection}
                   loading={loading}
+                  onJobUpdate={setJob}
                 />
               </div>
             </main>

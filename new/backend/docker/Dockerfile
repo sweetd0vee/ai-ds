@@ -12,6 +12,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libfreetype6 \
         libpng16-16 \
+        fonts-dejavu-core \
+        fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt

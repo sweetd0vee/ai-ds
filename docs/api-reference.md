@@ -45,15 +45,19 @@
 
 | Поле | Тип | Обязательно | Описание |
 |------|-----|-------------|----------|
-| `file` | file | да | `.csv` или `.xlsx` |
+| `files` | file[] | да* | Один или несколько `.csv` / `.xlsx` (до 10) |
+| `file` | file | да* | Один файл (совместимость со старым клиентом) |
 | `graph_count` | int | нет | `10`, `15`, `20` или `30` (default: 20) |
 | `analyst_model` | string | нет | Должна быть в `analyst_models` |
+
+\* Нужен хотя бы один из `files` / `file`.
 
 **Ответ 200:**
 ```json
 {
   "job_id": "uuid",
-  "filename": "data.csv",
+  "filename": "orders.csv +1",
+  "filenames": ["orders.csv", "customers.csv"],
   "message": "Анализ запущен",
   "graph_count": 20
 }
@@ -62,8 +66,9 @@
 **Ошибки:** 400 — неверный формат/модель/количество графиков.
 
 **Побочные эффекты:**
-- Создаётся `data/jobs/{job_id}/input.{ext}`
+- Файлы сохраняются в `data/jobs/{job_id}/inputs/`
 - Запускается `run_analysis_pipeline` в фоне
+- При нескольких таблицах ищутся ключи join/union, анализ идёт по объединённой выборке
 
 ---
 
