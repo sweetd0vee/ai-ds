@@ -6,12 +6,22 @@ const PRIORITY_LABELS = {
   low: 'Низкий',
 }
 
-function HypothesisCard({ item }) {
+function HypothesisCard({ item, selected, onToggle }) {
   const priority = item.priority || 'medium'
 
   return (
-    <article className={`hypothesis-card hypothesis-card--${priority}`}>
+    <article
+      className={`hypothesis-card hypothesis-card--${priority} ${selected ? 'hypothesis-card--selected' : 'hypothesis-card--unchecked'}`}
+    >
       <header className="hypothesis-card-header">
+        <label className="hypothesis-check">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggle(item.id)}
+            aria-label={`Выбрать гипотезу ${item.id}`}
+          />
+        </label>
         <span className="hypothesis-id">#{item.id}</span>
         <h4 className="hypothesis-title">{item.title}</h4>
         {item.kind_label || item.kind ? (
@@ -73,7 +83,13 @@ function HypothesesFallback({ text }) {
   )
 }
 
-export default function HypothesesView({ results }) {
+export default function HypothesesView({
+  results,
+  selectedIds,
+  onToggle,
+  onSelectAll,
+  onSelectNone,
+}) {
   const hypotheses = results?.hypotheses
   const raw = results?.hypotheses_raw
 
@@ -85,6 +101,9 @@ export default function HypothesesView({ results }) {
     return <HypothesesFallback text={raw} />
   }
 
+  const selectedCount = selectedIds?.size ?? 0
+  const allSelected = selectedCount === hypotheses.length && hypotheses.length > 0
+
   return (
     <div className="hypotheses-view">
       <div className="hypotheses-intro-block">
@@ -93,11 +112,28 @@ export default function HypothesesView({ results }) {
           Ниже — проверяемые гипотезы, которые Python сначала подтвердил цифрами
           (ядро рынка, выбросы, редкие категории, различия групп), а затем модель сформулировала ясным языком.
         </p>
+        <div className="hypotheses-select-bar">
+          <button
+            type="button"
+            className="hypotheses-select-btn"
+            onClick={allSelected ? onSelectNone : onSelectAll}
+          >
+            {allSelected ? 'Снять все' : 'Выбрать все'}
+          </button>
+          <span className="hypotheses-select-count">
+            Выбрано {selectedCount} из {hypotheses.length}
+          </span>
+        </div>
       </div>
 
       <div className="hypotheses-list">
         {hypotheses.map((item) => (
-          <HypothesisCard key={item.id ?? item.title} item={item} />
+          <HypothesisCard
+            key={item.id ?? item.title}
+            item={item}
+            selected={Boolean(selectedIds?.has(item.id))}
+            onToggle={onToggle}
+          />
         ))}
       </div>
     </div>

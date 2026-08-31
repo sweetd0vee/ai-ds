@@ -1,8 +1,13 @@
-export default function PreviewTable({ preview, columns }) {
+import { Loader2 } from 'lucide-react'
+
+export default function PreviewTable({ preview, columns, pending = false }) {
   if (!preview?.length) {
     return (
       <div className="table-scroll table-scroll--empty">
-        <div className="empty">Данные загружаются…</div>
+        <div className={`empty${pending ? ' empty--loading' : ''}`}>
+          {pending && <Loader2 size={18} className="spin" />}
+          {pending ? 'Данные загружаются…' : 'Нет строк для предпросмотра'}
+        </div>
       </div>
     )
   }

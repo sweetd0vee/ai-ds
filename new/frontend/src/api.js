@@ -91,7 +91,6 @@ export function streamJobStatus(jobId, onUpdate, onError) {
   }
 
   source.onerror = () => {
-    source.close()
     onError?.(new Error('Соединение с сервером прервано'))
   }
 
@@ -119,6 +118,21 @@ export async function downloadAllPlots(jobId) {
 export async function downloadJobFile(jobId, filename) {
   if (!jobId) throw new Error('Задача не найдена')
   const res = await fetch(downloadUrl(jobId, filename))
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(parseApiDetail(err.detail, `Не удалось скачать файл (${res.status})`))
+  }
+  triggerBlobDownload(await res.blob(), filename)
+}
+
+export async function exportHypotheses(jobId, ids, format = 'xlsx') {
+  if (!jobId) throw new Error('Задача не найдена')
+  const filename = format === 'docx' ? 'hypotheses_report.docx' : 'hypotheses_report.xlsx'
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/hypotheses/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, format }),
+  })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(parseApiDetail(err.detail, `Не удалось скачать файл (${res.status})`))

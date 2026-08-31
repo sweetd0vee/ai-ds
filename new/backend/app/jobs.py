@@ -193,7 +193,7 @@ class JobStore:
 
     @staticmethod
     def to_dict(job: Job) -> dict:
-        return {
+        return convert_numpy_types({
             "job_id": job.id,
             "status": job.status,
             "step": job.step,
@@ -204,7 +204,7 @@ class JobStore:
             "graph_count": job.graph_count,
             "analyst_model": job.analyst_model,
             "results": JobStore._enrich_results(job.results or None),
-        }
+        })
 
     async def update(
         self,

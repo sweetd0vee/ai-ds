@@ -17,21 +17,26 @@ export function useJobStream() {
     setLoading(true)
     setError(null)
 
-    cleanupRef.current = streamJobStatus(
-      jobId,
-      (data) => {
-        setJob(data)
-        if (data.status === 'completed' || data.status === 'failed') {
-          setLoading(false)
-          stopStream()
-        }
-      },
-      (err) => {
-        getJobStatus(jobId).then(setJob).catch(() => {})
-        setError(err?.message || 'Ошибка соединения')
+    const apply = (data) => {
+      if (!data) return
+      setJob(data)
+      if (data.status === 'completed' || data.status === 'failed') {
         setLoading(false)
-      },
-    )
+        stopStream()
+      }
+    }
+
+    const poll = () => {
+      getJobStatus(jobId).then(apply).catch(() => {})
+    }
+
+    const intervalId = setInterval(poll, 2000)
+    const closeSse = streamJobStatus(jobId, apply, poll)
+
+    cleanupRef.current = () => {
+      clearInterval(intervalId)
+      closeSse()
+    }
   }, [stopStream])
 
   const resetJob = useCallback(() => {

@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class JobCreateResponse(BaseModel):
@@ -54,3 +54,8 @@ class JobListResponse(BaseModel):
 class AppConfigResponse(BaseModel):
     analyst_models: list[str]
     default_analyst_model: str
+
+
+class HypothesesExportRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+    format: Literal["xlsx", "docx"] = "xlsx"

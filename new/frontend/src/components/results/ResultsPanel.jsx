@@ -1,10 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Download, Loader2, Table2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   downloadAllPlots,
   downloadJobFile,
   downloadPlot,
+  exportHypotheses,
   plotUrl,
 } from '../../api'
 import { PREVIEW_ROWS, RESULT_SECTIONS } from '../../constants'
@@ -44,12 +45,6 @@ const SECTION_DOWNLOADS = [
     when: (_, results) => Boolean(results?.analysis_summary),
   },
   {
-    section: 'hypotheses',
-    filename: 'hypotheses_report.docx',
-    label: 'Гипотезы DOCX',
-    when: (_, results) => Boolean(results?.hypotheses?.length || results?.hypotheses_raw),
-  },
-  {
     section: 'structure',
     filename: 'data_structure.xlsx',
     label: 'Структура XLSX',
@@ -69,7 +64,17 @@ function BodyFill({ children }) {
   return <div className="content-body-fill">{children}</div>
 }
 
-function ResultsContent({ activeSection, results, effectiveJobId, onOpenPlot }) {
+function ResultsContent({
+  activeSection,
+  results,
+  effectiveJobId,
+  onOpenPlot,
+  pending,
+  selectedHypothesisIds,
+  onToggleHypothesis,
+  onSelectAllHypotheses,
+  onSelectNoneHypotheses,
+}) {
   switch (activeSection) {
     case 'preview':
       return (
@@ -79,7 +84,7 @@ function ResultsContent({ activeSection, results, effectiveJobId, onOpenPlot }) 
               {results.shape[0]} строк × {results.shape[1]} столбцов · первые {PREVIEW_ROWS} записей
             </p>
           )}
-          <PreviewTable preview={results?.preview} columns={results?.columns} />
+          <PreviewTable preview={results?.preview} columns={results?.columns} pending={pending} />
         </BodyFill>
       )
     case 'structure':
@@ -117,7 +122,13 @@ function ResultsContent({ activeSection, results, effectiveJobId, onOpenPlot }) 
     case 'hypotheses':
       return (
         <BodyFill>
-          <HypothesesView results={results} />
+          <HypothesesView
+            results={results}
+            selectedIds={selectedHypothesisIds}
+            onToggle={onToggleHypothesis}
+            onSelectAll={onSelectAllHypotheses}
+            onSelectNone={onSelectNoneHypotheses}
+          />
         </BodyFill>
       )
     case 'viz_code':
@@ -143,13 +154,36 @@ function ResultsContent({ activeSection, results, effectiveJobId, onOpenPlot }) 
   }
 }
 
-export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
+export default function ResultsPanel({ jobId, job, activeSection, onSection, loading = false }) {
   const results = job?.results
+  const pending = Boolean(
+    loading
+    || job?.status === 'running'
+    || (job && job.status !== 'completed' && job.status !== 'failed' && !results?.preview?.length),
+  )
   const [lightbox, setLightbox] = useState(null)
   const [plotsDownloading, setPlotsDownloading] = useState(false)
+  const [hypothesesExporting, setHypothesesExporting] = useState(null)
+  const [selectedHypothesisIds, setSelectedHypothesisIds] = useState(() => new Set())
   const effectiveJobId = jobId || job?.job_id || job?.id
   const plotFiles = results?.plot_files || []
   const textContent = sectionTextContent(activeSection, results)
+  const hypothesisItems = results?.hypotheses || []
+  const hypothesisIdsKey = hypothesisItems.map((item) => item.id).join(',')
+  const canExportHypotheses = Boolean(hypothesisItems.length || results?.hypotheses_raw)
+
+  useEffect(() => {
+    if (!hypothesisIdsKey) {
+      setSelectedHypothesisIds(new Set())
+      return
+    }
+    setSelectedHypothesisIds(new Set(
+      hypothesisIdsKey.split(',').map((id) => {
+        const numeric = Number(id)
+        return Number.isNaN(numeric) ? id : numeric
+      }),
+    ))
+  }, [effectiveJobId, hypothesisIdsKey])
 
   const handleDownloadAllPlots = async () => {
     if (!effectiveJobId || !plotFiles.length || plotsDownloading) return
@@ -161,6 +195,37 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
     } finally {
       setPlotsDownloading(false)
     }
+  }
+
+  const handleHypothesesExport = async (format) => {
+    if (!effectiveJobId || hypothesesExporting) return
+    if (hypothesisItems.length) {
+      if (!selectedHypothesisIds.size) {
+        window.alert('Выберите хотя бы одну гипотезу для экспорта')
+        return
+      }
+      setHypothesesExporting(format)
+      try {
+        await exportHypotheses(effectiveJobId, [...selectedHypothesisIds], format)
+      } catch (e) {
+        window.alert(e.message || 'Не удалось экспортировать гипотезы')
+      } finally {
+        setHypothesesExporting(null)
+      }
+      return
+    }
+
+    const filename = format === 'xlsx' ? 'hypotheses_report.xlsx' : 'hypotheses_report.docx'
+    await downloadArtifact(effectiveJobId, filename, 'Не удалось экспортировать гипотезы')
+  }
+
+  const toggleHypothesis = (id) => {
+    setSelectedHypothesisIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   return (
@@ -210,6 +275,31 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
               </button>
             ))}
 
+            {activeSection === 'hypotheses' && canExportHypotheses && (
+              <>
+                <button
+                  type="button"
+                  className="download-btn"
+                  onClick={() => handleHypothesesExport('docx')}
+                  disabled={!effectiveJobId || Boolean(hypothesesExporting) || (hypothesisItems.length > 0 && selectedHypothesisIds.size === 0)}
+                >
+                  {hypothesesExporting === 'docx' ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                  {hypothesesExporting === 'docx' ? 'Формирование…' : 'Гипотезы DOCX'}
+                </button>
+                {hypothesisItems.length > 0 && (
+                  <button
+                    type="button"
+                    className="download-btn"
+                    onClick={() => handleHypothesesExport('xlsx')}
+                    disabled={!effectiveJobId || Boolean(hypothesesExporting) || selectedHypothesisIds.size === 0}
+                  >
+                    {hypothesesExporting === 'xlsx' ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+                    {hypothesesExporting === 'xlsx' ? 'Формирование…' : 'Гипотезы XLSX'}
+                  </button>
+                )}
+              </>
+            )}
+
             {activeSection === 'plots' && plotFiles.length > 0 && (
               <button
                 type="button"
@@ -237,6 +327,11 @@ export default function ResultsPanel({ jobId, job, activeSection, onSection }) {
                 results={results}
                 effectiveJobId={effectiveJobId}
                 onOpenPlot={setLightbox}
+                pending={pending}
+                selectedHypothesisIds={selectedHypothesisIds}
+                onToggleHypothesis={toggleHypothesis}
+                onSelectAllHypotheses={() => setSelectedHypothesisIds(new Set(hypothesisItems.map((item) => item.id)))}
+                onSelectNoneHypotheses={() => setSelectedHypothesisIds(new Set())}
               />
             </motion.div>
           </AnimatePresence>

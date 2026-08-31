@@ -12,6 +12,7 @@ from ..jobs import JobStore
 from ..core.sandbox import run_sandbox_code
 from ..models import (
     AppConfigResponse,
+    HypothesesExportRequest,
     JobCreateResponse,
     JobListItem,
     JobListResponse,
@@ -147,11 +148,11 @@ async def stream_job_status(job_id: str):
 
     async def event_generator():
         try:
-            yield f"data: {json.dumps(job_store.to_dict(job), ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps(job_store.to_dict(job), ensure_ascii=False, default=str)}\n\n"
             while True:
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
                     if payload["status"] in ("completed", "failed"):
                         break
                 except asyncio.TimeoutError:
@@ -207,12 +208,67 @@ async def run_job_code(job_id: str, body: RunCodeRequest):
     return RunCodeResponse(**payload)
 
 
+@router.post("/jobs/{job_id}/hypotheses/export")
+async def export_hypotheses(job_id: str, body: HypothesesExportRequest):
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(404, "Задача не найдена")
+
+    hypotheses = job.results.get("hypotheses") or [] if job.results else []
+    raw = job.results.get("hypotheses_raw") or "" if job.results else ""
+    if not hypotheses and not raw:
+        raise HTTPException(404, "Гипотезы не найдены")
+
+    from ..core.hypotheses_export import (
+        build_hypotheses_docx,
+        build_hypotheses_xlsx,
+        filter_hypotheses_by_ids,
+    )
+
+    if hypotheses:
+        if not body.ids:
+            raise HTTPException(400, "Выберите хотя бы одну гипотезу")
+        selected = filter_hypotheses_by_ids(hypotheses, body.ids)
+        if not selected:
+            raise HTTPException(400, "Среди выбранных нет доступных гипотез")
+    else:
+        selected = []
+
+    filename = "hypotheses_report.xlsx" if body.format == "xlsx" else "hypotheses_report.docx"
+    file_path = Path(job.output_dir) / filename
+    try:
+        if body.format == "xlsx":
+            build_hypotheses_xlsx(
+                selected,
+                file_path,
+                source_file=job.filename,
+                raw_fallback=raw,
+            )
+        else:
+            build_hypotheses_docx(
+                selected,
+                file_path,
+                source_file=job.filename,
+                raw_fallback=raw,
+            )
+    except Exception as exc:
+        logger.exception("Failed to export hypotheses %s for job %s", body.format, job_id)
+        raise HTTPException(500, f"Не удалось сформировать файл: {exc}") from exc
+
+    media_types = {
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    return FileResponse(file_path, filename=filename, media_type=media_types[body.format])
+
+
 @router.get("/jobs/{job_id}/download/{filename}")
 async def download_file(job_id: str, filename: str):
     allowed = {
         "final_report.txt", "final_report.docx",
         "analysis_summary_report.txt", "analysis_summary_report.docx",
         "hypotheses_report.docx",
+        "hypotheses_report.xlsx",
         "plots_report.docx",
         "generated_calculation_code.py", "generated_visualization_code.py",
         "quality_report.txt", "correlations.txt",
@@ -266,23 +322,32 @@ async def download_file(job_id: str, filename: str):
         except Exception as exc:
             logger.exception("Failed to build analysis_summary_report.docx for job %s", job_id)
             raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
-    elif filename == "hypotheses_report.docx":
+    elif filename in ("hypotheses_report.docx", "hypotheses_report.xlsx"):
         hypotheses = job.results.get("hypotheses") or []
         raw = job.results.get("hypotheses_raw") or ""
         if not hypotheses and not raw:
             raise HTTPException(404, "Гипотезы не найдены")
-        from ..core.hypotheses_export import build_hypotheses_docx
+        from ..core.hypotheses_export import build_hypotheses_docx, build_hypotheses_xlsx
 
         try:
-            build_hypotheses_docx(
-                hypotheses,
-                file_path,
-                source_file=job.filename,
-                raw_fallback=raw,
-            )
+            if filename.endswith(".xlsx"):
+                build_hypotheses_xlsx(
+                    hypotheses,
+                    file_path,
+                    source_file=job.filename,
+                    raw_fallback=raw,
+                )
+            else:
+                build_hypotheses_docx(
+                    hypotheses,
+                    file_path,
+                    source_file=job.filename,
+                    raw_fallback=raw,
+                )
         except Exception as exc:
-            logger.exception("Failed to build hypotheses_report.docx for job %s", job_id)
-            raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
+            logger.exception("Failed to build %s for job %s", filename, job_id)
+            kind = "XLSX" if filename.endswith(".xlsx") else "DOCX"
+            raise HTTPException(500, f"Не удалось сформировать {kind}: {exc}") from exc
     elif filename == "plots_report.docx":
         plot_files = job.results.get("plot_files") or []
         if not plot_files:
@@ -326,6 +391,7 @@ async def download_file(job_id: str, filename: str):
         "final_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "analysis_summary_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "hypotheses_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "hypotheses_report.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "plots_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
     return FileResponse(

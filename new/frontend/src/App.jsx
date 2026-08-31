@@ -246,6 +246,7 @@ export default function App() {
                   job={job}
                   activeSection={activeSection}
                   onSection={setActiveSection}
+                  loading={loading}
                 />
               </div>
             </main>
