@@ -28,7 +28,8 @@ def _load_analysis_frame(analysis_path: str | None, file_path: str, datetime_can
         path = Path(analysis_path)
         if path.exists():
             with path.open("rb") as fh:
-                df = pickle.load(fh)
+                loaded = pickle.load(fh)
+            df = next(iter(loaded.values())) if isinstance(loaded, dict) else loaded
             if datetime_candidates:
                 df = preprocess_dates_based_on_llm(df, datetime_candidates)
             return df

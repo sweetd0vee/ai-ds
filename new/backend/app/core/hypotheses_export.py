@@ -156,17 +156,6 @@ def build_hypotheses_xlsx(
     wrap_center = Alignment(wrap_text=True, vertical="top", horizontal="center")
 
     row = 1
-    ws.cell(row, 1, "Гипотезы о данных").font = Font(bold=True, size=14, color="111827")
-    row += 1
-
-    meta_parts = [f"Сформировано: {datetime.now().strftime('%d.%m.%Y %H:%M')}"]
-    if source_file:
-        meta_parts.append(f"Файл: {source_file}")
-    if hypotheses:
-        meta_parts.append(f"Гипотез: {len(hypotheses)}")
-    ws.cell(row, 1, " · ".join(meta_parts)).font = Font(size=10, color="6B7280")
-    row += 2
-
     if hypotheses:
         for col_idx, title in enumerate(_XLSX_HEADERS, start=1):
             cell = ws.cell(row, col_idx, title)

@@ -31,8 +31,9 @@ def build_final_report(
         f"Файл: {filename}",
     ]
     if table_count > 1:
-        data_lines.append(f"Таблиц: {table_count}.")
-    data_lines.append(f"Размер анализируемой выборки: {rows} строк × {cols} столбцов.")
+        data_lines.append(f"Таблиц: {table_count}. Каждая анализируется отдельно, без объединения.")
+    else:
+        data_lines.append(f"Размер: {rows} строк × {cols} столбцов.")
     data_lines.append(f"Визуализация: построено {n_plots} графиков (запрошено {graph_count}).")
 
     sections = [

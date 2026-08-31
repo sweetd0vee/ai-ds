@@ -3,10 +3,13 @@ export function sectionHasData(sectionId, results) {
 
   const checks = {
     preview: results.preview || results.tables?.length,
-    structure: results.data_structure || results.parsed_data_structure || results.data_structure_raw || results.tables?.length,
+    structure: results.data_structure || results.parsed_data_structure || results.data_structure_raw
+      || results.tables?.some((t) => t.structure) || results.tables?.length,
     relations: (results.tables?.length > 1) || results.relations,
-    insights: results.quality_report || results.discovery,
-    metrics_plan: results.metrics_plan_dict,
+    insights: results.quality_report || results.discovery
+      || results.tables?.some((t) => t.quality_report || t.discovery),
+    metrics_plan: results.metrics_plan_dict
+      || results.tables?.some((t) => t.metrics_plan_dict && Object.keys(t.metrics_plan_dict).length),
     calculation_code: results.calculation_code,
     metrics: results.metrics_results_raw,
     analysis: results.analysis_summary,

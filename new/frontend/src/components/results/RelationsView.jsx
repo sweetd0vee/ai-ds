@@ -11,57 +11,10 @@ function scorePct(score) {
   return `${Math.round(Number(score) * 100)}%`
 }
 
-function JoinPlan({ plan, tablesById }) {
-  if (!plan || plan.mode === 'single') return null
-
-  const modeLabel = {
-    join: 'Объединение по ключам (left join)',
-    union: 'Склейка строк (одинаковая схема)',
-    largest: 'Анализ самой большой таблицы',
-  }[plan.mode] || plan.mode
-
-  return (
-    <div className="insights-block">
-      <h4>Как собрана таблица для анализа</h4>
-      <p className="insights-desc">
-        {modeLabel}. Основа: <strong>{tablesById[plan.primary] || plan.primary}</strong>
-        {plan.rows_after != null && (
-          <> · итог {plan.rows_after} строк × {plan.cols_after} столбцов</>
-        )}
-      </p>
-      {(plan.steps || []).length > 0 && (
-        <ol className="relation-steps">
-          {plan.steps.map((step, i) => (
-            <li key={i}>
-              {step.action === 'join' ? (
-                <>
-                  JOIN <strong>{step.from}</strong>.{step.left_column} → <strong>{step.to}</strong>.{step.right_column}
-                  {step.match_pct != null && (
-                    <> · совпало {step.matched_rows}/{step.left_rows} ({step.match_pct}%)</>
-                  )}
-                </>
-              ) : (
-                <>UNION <strong>{step.table}</strong>: {step.rows} строк</>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-      {(plan.unmatched || []).length > 0 && (
-        <p className="insights-muted">
-          Не вошли в объединение: {plan.unmatched.map((id) => tablesById[id] || id).join(', ')}
-        </p>
-      )}
-      {plan.note && <p className="insights-muted">{plan.note}</p>}
-    </div>
-  )
-}
-
 export default function RelationsView({ results }) {
   const relations = results?.relations
   const tables = results?.tables || []
   const links = relations?.links || []
-  const plan = results?.join_plan
   const tablesById = Object.fromEntries(tables.map((t) => [t.id, t.name]))
 
   if (!relations && tables.length < 2) {
@@ -89,8 +42,6 @@ export default function RelationsView({ results }) {
         </div>
       )}
 
-      <JoinPlan plan={plan} tablesById={tablesById} />
-
       {links.length === 0 ? (
         <p className="insights-muted">
           Общих ключей не найдено: нет пересечения значений и нет похожих имён столбцов.
@@ -98,6 +49,9 @@ export default function RelationsView({ results }) {
       ) : (
         <div className="insights-block">
           <h4>Найденные связи</h4>
+          <p className="insights-desc">
+            Таблицы не объединялись: ниже только кандидаты ключей. Связь может отсутствовать.
+          </p>
           <div className="relation-cards">
             {links.map((link, i) => (
               <article key={`${link.left_table}-${link.right_table}-${i}`} className="relation-card">

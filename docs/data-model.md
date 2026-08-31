@@ -38,7 +38,7 @@ interface JobStatusResponse {
 | `tables` | `list[object]` | preparing | Исходные таблицы: id, name, preview, structure |
 | `table_count` | `int` | preparing | Число загруженных таблиц |
 | `relations` | `object` | preparing | Найденные join/union связи |
-| `join_plan` | `object` | preparing | Как собрана таблица для анализа |
+| `join_plan` | `object` | preparing | Какая таблица взята для метрик (`mode: separate`), без join |
 | `relations_raw` | `str` | preparing | Текст отчёта о связях |
 | `graph_count` | `int` | preparing | Запрошенное число графиков |
 | `data_structure_raw` | `str` | structure | Текстовое описание структуры |

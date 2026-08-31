@@ -1,3 +1,6 @@
+import { useActiveTable } from '../../hooks/useActiveTable'
+import DatasetSwitcher from './DatasetSwitcher'
+
 const ISSUE_LABELS = {
   high_missing: 'Много пропусков',
   moderate_missing: 'Есть пропуски',
@@ -256,15 +259,20 @@ function DiscoveryPanel({ discovery }) {
 }
 
 export default function InsightsView({ results }) {
-  const quality = results?.quality_report
-  const correlations = results?.correlations
-  const discovery = results?.discovery
+  const tables = results?.tables || []
+  const { items, active, activeId, setActiveId } = useActiveTable(tables)
+  const quality = active?.quality_report || (tables.length <= 1 ? results?.quality_report : null)
+  const correlations = active?.correlations || (tables.length <= 1 ? results?.correlations : null)
+  const discovery = active?.discovery || (tables.length <= 1 ? results?.discovery : null)
 
   if (!quality && !discovery) {
     return (
-      <pre className="code-view">
-        {results?.quality_report_raw || 'Ожидание анализа качества…'}
-      </pre>
+      <>
+        <DatasetSwitcher items={items} value={activeId} onChange={setActiveId} />
+        <pre className="code-view">
+          {active?.quality_report_raw || results?.quality_report_raw || 'Ожидание анализа качества…'}
+        </pre>
+      </>
     )
   }
 
@@ -302,6 +310,7 @@ export default function InsightsView({ results }) {
 
   return (
     <div className="insights-view">
+      <DatasetSwitcher items={items} value={activeId} onChange={setActiveId} />
       <div className={`quality-score-card ${gradeClass}`}>
         <div className="quality-score-value">{summary.overall_score ?? '—'}</div>
         <div className="quality-score-meta">

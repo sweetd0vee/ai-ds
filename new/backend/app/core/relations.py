@@ -1,10 +1,9 @@
-"""Поиск связей между несколькими таблицами и сборка объединённого датафрейма."""
+"""Поиск связей между несколькими таблицами без автоматического объединения."""
 
 from __future__ import annotations
 
 import logging
 import re
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -318,20 +317,21 @@ def detect_relations(tables: list[dict]) -> dict:
 
     if join_links:
         summary = (
-            f"Найдено связей для объединения: {len(join_links)} "
-            f"(лучший ключ: {join_links[0]['left_table']}.{join_links[0]['left_column']} ↔ "
+            f"Найдено возможных ключей: {len(join_links)} "
+            f"(лучший: {join_links[0]['left_table']}.{join_links[0]['left_column']} ↔ "
             f"{join_links[0]['right_table']}.{join_links[0]['right_column']}, "
-            f"уверенность {round((join_links[0]['score'] or 0) * 100)}%)."
+            f"уверенность {round((join_links[0]['score'] or 0) * 100)}%). "
+            "Таблицы не объединялись — связь может отсутствовать."
         )
     elif union_links:
         summary = (
-            f"Ключей для join нет, но {len(union_links)} пар таблиц имеют почти одинаковую схему "
-            "и могут быть объединены по строкам."
+            f"Ключей для join нет, но {len(union_links)} пар таблиц имеют почти одинаковую схему. "
+            "Таблицы не склеивались автоматически."
         )
     else:
         summary = (
             "Общих ключей и совместимых схем не найдено. "
-            "Анализ выполнен по самой большой таблице, остальные доступны во вкладках."
+            "Таблицы анализируются отдельно."
         )
 
     return convert_numpy_types({
@@ -343,240 +343,7 @@ def detect_relations(tables: list[dict]) -> dict:
     })
 
 
-def _canon_series(series: pd.Series) -> pd.Series:
-    return series.map(_canon_value)
-
-
-def _rename_collisions(df: pd.DataFrame, other_columns: set[str], prefix: str, keep: set[str]) -> pd.DataFrame:
-    rename = {}
-    for col in df.columns:
-        if col in keep:
-            continue
-        if col in other_columns:
-            rename[col] = f"{prefix}.{col}"
-    if rename:
-        df = df.rename(columns=rename)
-    return df
-
-
-def _connected_groups(table_ids: list[str], edges: list[tuple[str, str]]) -> list[list[str]]:
-    parent = {tid: tid for tid in table_ids}
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    for a, b in edges:
-        if a in parent and b in parent:
-            union(a, b)
-
-    groups: dict[str, list[str]] = defaultdict(list)
-    for tid in table_ids:
-        groups[find(tid)].append(tid)
-    return list(groups.values())
-
-
-def build_analysis_frame(tables: list[dict], relations: dict) -> tuple[pd.DataFrame, dict]:
-    by_id = {t["id"]: t for t in tables}
-    if len(tables) == 1:
-        table = tables[0]
-        plan = {
-            "mode": "single",
-            "primary": table["id"],
-            "included": [table["id"]],
-            "steps": [],
-            "unmatched": [],
-            "rows_before": table["rows"],
-            "rows_after": table["rows"],
-            "cols_after": table["cols"],
-        }
-        return table["df"].copy(), plan
-
-    join_links = [l for l in relations.get("join_links") or [] if (l.get("score") or 0) >= JOIN_SCORE_MIN]
-    union_links = [l for l in relations.get("union_links") or [] if (l.get("score") or 0) >= UNION_COL_JACCARD]
-
-    if join_links:
-        return _join_tables(by_id, tables, join_links)
-    if union_links:
-        return _union_tables(by_id, tables, union_links)
-
-    primary = max(tables, key=lambda t: (t["rows"], t["cols"]))
-    plan = {
-        "mode": "largest",
-        "primary": primary["id"],
-        "included": [primary["id"]],
-        "steps": [],
-        "unmatched": [t["id"] for t in tables if t["id"] != primary["id"]],
-        "rows_before": primary["rows"],
-        "rows_after": primary["rows"],
-        "cols_after": primary["cols"],
-        "note": "Связей не найдено — анализ по самой большой таблице.",
-    }
-    return primary["df"].copy(), plan
-
-
-def _join_tables(by_id: dict, tables: list[dict], join_links: list[dict]) -> tuple[pd.DataFrame, dict]:
-    table_ids = [t["id"] for t in tables]
-    used_pairs: set[tuple[str, str]] = set()
-    mst_edges = []
-    parent = {tid: tid for tid in table_ids}
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for link in sorted(join_links, key=lambda x: x["score"], reverse=True):
-        a, b = link["left_table"], link["right_table"]
-        if find(a) == find(b):
-            continue
-        parent[find(b)] = find(a)
-        key = tuple(sorted((a, b)))
-        if key in used_pairs:
-            continue
-        used_pairs.add(key)
-        mst_edges.append(link)
-
-    if not mst_edges:
-        primary = max(tables, key=lambda t: t["rows"])
-        return primary["df"].copy(), {
-            "mode": "largest",
-            "primary": primary["id"],
-            "included": [primary["id"]],
-            "steps": [],
-            "unmatched": [t["id"] for t in tables if t["id"] != primary["id"]],
-            "rows_before": primary["rows"],
-            "rows_after": primary["rows"],
-            "cols_after": primary["cols"],
-        }
-
-    groups = _connected_groups(table_ids, [(e["left_table"], e["right_table"]) for e in mst_edges])
-    main_group = max(groups, key=lambda g: sum(by_id[i]["rows"] for i in g if i in by_id))
-    primary_id = max(main_group, key=lambda i: by_id[i]["rows"])
-
-    work = by_id[primary_id]["df"].copy()
-    included = {primary_id}
-    steps = []
-    adjacency: dict[str, list[dict]] = defaultdict(list)
-    swap_card = {"1:N": "N:1", "N:1": "1:N"}
-    for link in mst_edges:
-        adjacency[link["left_table"]].append(link)
-        reversed_card = swap_card.get(link.get("cardinality"), link.get("cardinality"))
-        adjacency[link["right_table"]].append({
-            **link,
-            "left_table": link["right_table"],
-            "right_table": link["left_table"],
-            "left_column": link["right_column"],
-            "right_column": link["left_column"],
-            "coverage_left": link.get("coverage_right"),
-            "coverage_right": link.get("coverage_left"),
-            "cardinality": reversed_card,
-            "cardinality_label": CARDINALITY_LABELS.get(reversed_card, link.get("cardinality_label")),
-        })
-
-    queue = [primary_id]
-    while queue:
-        current = queue.pop(0)
-        for link in adjacency.get(current, []):
-            other = link["right_table"]
-            if other in included or other not in by_id:
-                continue
-            left_on = link["left_column"]
-            right_on = link["right_column"]
-            if left_on not in work.columns:
-                continue
-            right_df = by_id[other]["df"].copy()
-            if right_on not in right_df.columns:
-                continue
-
-            keep = {right_on}
-            right_df = _rename_collisions(right_df, set(work.columns), by_id[other]["id"], keep)
-            if right_on not in right_df.columns:
-                continue
-
-            left_keys = _canon_series(work[left_on])
-            right_keys = _canon_series(right_df[right_on])
-            tmp_left = work.copy()
-            tmp_right = right_df.copy()
-            tmp_left["__join_key__"] = left_keys
-            tmp_right["__join_key__"] = right_keys
-            tmp_right = tmp_right.drop(columns=[right_on], errors="ignore")
-            tmp_right = tmp_right.drop_duplicates("__join_key__", keep="first")
-
-            before = len(tmp_left)
-            right_key_set = set(tmp_right["__join_key__"].dropna())
-            matched_rows = int(tmp_left["__join_key__"].isin(right_key_set).sum())
-            merged = tmp_left.merge(tmp_right, on="__join_key__", how="left")
-            merged = merged.drop(columns=["__join_key__"])
-            work = merged
-            included.add(other)
-            queue.append(other)
-            steps.append({
-                "action": "join",
-                "from": current,
-                "to": other,
-                "left_column": left_on,
-                "right_column": right_on,
-                "how": "left",
-                "cardinality": link.get("cardinality"),
-                "matched_rows": matched_rows,
-                "left_rows": before,
-                "match_pct": _round(100.0 * matched_rows / max(before, 1), 2),
-                "score": link.get("score"),
-            })
-
-    unmatched = [t["id"] for t in tables if t["id"] not in included]
-    plan = {
-        "mode": "join",
-        "primary": primary_id,
-        "included": list(included),
-        "steps": steps,
-        "unmatched": unmatched,
-        "rows_before": by_id[primary_id]["rows"],
-        "rows_after": int(work.shape[0]),
-        "cols_after": int(work.shape[1]),
-    }
-    return work, convert_numpy_types(plan)
-
-
-def _union_tables(by_id: dict, tables: list[dict], union_links: list[dict]) -> tuple[pd.DataFrame, dict]:
-    table_ids = [t["id"] for t in tables]
-    groups = _connected_groups(
-        table_ids,
-        [(l["left_table"], l["right_table"]) for l in union_links],
-    )
-    main_group = max(groups, key=lambda g: sum(by_id[i]["rows"] for i in g if i in by_id))
-    frames = []
-    steps = []
-    for tid in main_group:
-        df = by_id[tid]["df"].copy()
-        df.insert(0, "_source_table", by_id[tid]["name"])
-        frames.append(df)
-        steps.append({"action": "concat", "table": tid, "rows": int(df.shape[0])})
-    work = pd.concat(frames, ignore_index=True, sort=False)
-    unmatched = [t["id"] for t in tables if t["id"] not in set(main_group)]
-    plan = {
-        "mode": "union",
-        "primary": main_group[0],
-        "included": list(main_group),
-        "steps": steps,
-        "unmatched": unmatched,
-        "rows_before": sum(by_id[i]["rows"] for i in main_group),
-        "rows_after": int(work.shape[0]),
-        "cols_after": int(work.shape[1]),
-    }
-    return work, convert_numpy_types(plan)
-
-
-def format_relations_report(relations: dict, join_plan: dict | None = None) -> str:
+def format_relations_report(relations: dict) -> str:
     lines = ["СВЯЗИ МЕЖДУ ТАБЛИЦАМИ", "=" * 36]
     if relations.get("summary"):
         lines.append(relations["summary"])
@@ -605,32 +372,11 @@ def format_relations_report(relations: dict, join_plan: dict | None = None) -> s
             lines.append(f"   {link['reason']}")
         lines.append("")
 
-    if join_plan:
-        lines.append("ПЛАН ОБЪЕДИНЕНИЯ")
-        lines.append(f"Режим: {join_plan.get('mode')}, основа: {join_plan.get('primary')}")
-        lines.append(
-            f"Строк: {join_plan.get('rows_before')} → {join_plan.get('rows_after')}, "
-            f"столбцов: {join_plan.get('cols_after')}"
-        )
-        for step in join_plan.get("steps") or []:
-            if step.get("action") == "join":
-                lines.append(
-                    f"  JOIN {step.get('from')}.{step.get('left_column')} → "
-                    f"{step.get('to')}.{step.get('right_column')} "
-                    f"({step.get('how')}, совпало {step.get('matched_rows')}/{step.get('left_rows')} "
-                    f"= {step.get('match_pct')}%)"
-                )
-            elif step.get("action") == "concat":
-                lines.append(f"  UNION {step.get('table')}: {step.get('rows')} строк")
-        if join_plan.get("unmatched"):
-            lines.append("Не вошли: " + ", ".join(join_plan["unmatched"]))
-        if join_plan.get("note"):
-            lines.append(join_plan["note"])
-
+    lines.append("Таблицы не объединялись автоматически.")
     return "\n".join(lines).strip()
 
 
-def relations_hypotheses(relations: dict, join_plan: dict | None = None) -> list[dict]:
+def relations_hypotheses(relations: dict) -> list[dict]:
     hyps = []
     for link in (relations.get("join_links") or [])[:6]:
         cov = max(link.get("coverage_left") or 0, link.get("coverage_right") or 0)
@@ -677,29 +423,5 @@ def relations_hypotheses(relations: dict, join_plan: dict | None = None) -> list
             "priority_label": "средний",
             "source": "python",
         })
-
-    if join_plan and join_plan.get("mode") == "join":
-        for step in join_plan.get("steps") or []:
-            pct = step.get("match_pct")
-            if pct is None or pct >= 85:
-                continue
-            hyps.append({
-                "id": len(hyps) + 1,
-                "kind": "table_relation",
-                "kind_label": "Связь таблиц",
-                "title": f"Неполное покрытие join {step.get('to')}",
-                "statement": (
-                    f"Если ключ «{step.get('left_column')}» ссылается на «{step.get('to')}», "
-                    f"то {round(100 - pct, 1)}% строк основы не находят пару "
-                    f"({step.get('matched_rows')}/{step.get('left_rows')})."
-                ),
-                "rationale": f"Left join match {pct}%.",
-                "columns": [step.get("left_column"), step.get("right_column")],
-                "verification": "Выгрузить несопоставленные ключи и проверить справочник/опечатки.",
-                "priority": "high" if pct < 60 else "medium",
-                "priority_label": "высокий" if pct < 60 else "средний",
-                "source": "python",
-            })
-            break
 
     return hyps[:8]

@@ -14,6 +14,7 @@ import CodeSandbox from '../CodeSandbox'
 import AnalysisView from './AnalysisView'
 import HypothesesView from './HypothesesView'
 import CopyButton from './CopyButton'
+import DatasetSwitcher from './DatasetSwitcher'
 import InsightsView from './InsightsView'
 import MetricsPlanView from './MetricsPlanView'
 import PlotsGallery from './PlotsGallery'
@@ -22,6 +23,7 @@ import RelationsView from './RelationsView'
 import ReportView from './ReportView'
 import StructureView from './StructureView'
 import { sectionHasData, sectionTextContent } from './sectionMeta'
+import { useActiveTable } from '../../hooks/useActiveTable'
 
 async function downloadArtifact(jobId, filename, errorLabel) {
   if (!jobId) return
@@ -69,6 +71,36 @@ const SECTION_DOWNLOADS = [
 
 function BodyFill({ children }) {
   return <div className="content-body-fill">{children}</div>
+}
+
+function MetricsResultsView({ results }) {
+  const tables = results?.tables || []
+  const { items, active, activeId, setActiveId } = useActiveTable(tables)
+  const text = active?.metrics_results_raw || (tables.length <= 1 ? results?.metrics_results_raw : '')
+  return (
+    <>
+      <DatasetSwitcher items={items} value={activeId} onChange={setActiveId} />
+      <pre className="code-view">{text || 'Ожидание…'}</pre>
+    </>
+  )
+}
+
+function PlotsSection({ results, effectiveJobId, onOpenPlot }) {
+  const tables = results?.tables || []
+  const { items, active, activeId, setActiveId } = useActiveTable(tables)
+  const plotFiles = (active?.plot_files?.length
+    ? active.plot_files
+    : (tables.length <= 1 ? results?.plot_files : active?.plot_files)) || []
+  return (
+    <div className="content-body-fill content-body-fill--scroll">
+      <DatasetSwitcher items={items} value={activeId} onChange={setActiveId} />
+      <PlotsGallery
+        jobId={effectiveJobId}
+        plotFiles={plotFiles.length ? plotFiles : results?.plot_files}
+        onOpen={onOpenPlot}
+      />
+    </div>
+  )
 }
 
 function ResultsContent({
@@ -122,7 +154,11 @@ function ResultsContent({
         </BodyFill>
       )
     case 'metrics':
-      return <pre className="code-view">{results?.metrics_results_raw || 'Ожидание…'}</pre>
+      return (
+        <BodyFill>
+          <MetricsResultsView results={results} />
+        </BodyFill>
+      )
     case 'analysis':
       return (
         <BodyFill>
@@ -154,13 +190,11 @@ function ResultsContent({
       )
     case 'plots':
       return (
-        <div className="content-body-fill content-body-fill--scroll">
-          <PlotsGallery
-            jobId={effectiveJobId}
-            plotFiles={results?.plot_files}
-            onOpen={onOpenPlot}
-          />
-        </div>
+        <PlotsSection
+          results={results}
+          effectiveJobId={effectiveJobId}
+          onOpenPlot={onOpenPlot}
+        />
       )
     default:
       return null
