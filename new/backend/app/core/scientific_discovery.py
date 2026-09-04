@@ -8,8 +8,8 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
-from .data_analysis import classify_column
-from .utils import convert_numpy_types
+from .data_analysis import column_kind
+from .utils import convert_numpy_types, safe_round as _round
 
 CORE_COVERAGE = 0.80
 CORE_MIN_SHARE = 0.05
@@ -56,25 +56,6 @@ SCRIPT_LABELS = {
 }
 
 
-def _safe_float(value) -> float | None:
-    if value is None:
-        return None
-    try:
-        f = float(value)
-        if np.isnan(f) or np.isinf(f):
-            return None
-        return f
-    except (TypeError, ValueError):
-        return None
-
-
-def _round(value, digits: int = 4):
-    f = _safe_float(value)
-    if f is None:
-        return None
-    return round(f, digits)
-
-
 def _pct(part: int, total: int, digits: int = 2) -> float:
     if not total:
         return 0.0
@@ -87,11 +68,7 @@ def _name_matches(name: str, hints: tuple[str, ...]) -> bool:
 
 
 def _column_kind(df: pd.DataFrame, col: str, parsed_structure: dict | None) -> str:
-    if parsed_structure:
-        for item in parsed_structure.get("columns", []):
-            if item.get("name") == col:
-                return item.get("kind") or classify_column(df, col)
-    return classify_column(df, col)
+    return column_kind(df, col, parsed_structure)
 
 
 def infer_column_roles(df: pd.DataFrame, parsed_structure: dict | None = None) -> dict:

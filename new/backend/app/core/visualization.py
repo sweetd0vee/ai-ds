@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from .data_analysis import classify_column
+from .data_analysis import column_kind
 from .plot_insights import build_plot_detail
 
 logger = logging.getLogger(__name__)
@@ -56,14 +56,8 @@ def _column_groups(df: pd.DataFrame, parsed_structure: dict | None = None) -> di
         "identifier": [],
         "textual": [],
     }
-    kind_map = {}
-    if parsed_structure:
-        for item in parsed_structure.get("columns", []):
-            if item.get("name"):
-                kind_map[item["name"]] = item.get("kind")
-
     for col in df.columns:
-        kind = kind_map.get(col) or classify_column(df, col)
+        kind = column_kind(df, col, parsed_structure)
         groups.get(kind, groups["categorical"]).append(col)
     return groups
 

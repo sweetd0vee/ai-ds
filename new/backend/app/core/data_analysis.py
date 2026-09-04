@@ -6,10 +6,9 @@ import json
 import logging
 import warnings
 
-import numpy as np
 import pandas as pd
 
-from .utils import convert_numpy_types
+from .utils import convert_numpy_types, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +38,6 @@ DATETIME_METRICS = [
 ]
 
 IDENTIFIER_METRICS = ["count", "nunique"]
-
-
-def _safe_float(value) -> float | None:
-    if value is None:
-        return None
-    try:
-        f = float(value)
-        if np.isnan(f) or np.isinf(f):
-            return None
-        return f
-    except (TypeError, ValueError):
-        return None
 
 
 def _column_name_suggests_datetime(name: str) -> bool:
@@ -139,6 +126,15 @@ def classify_column(df: pd.DataFrame, col: str) -> str:
         return "textual"
 
     return "categorical"
+
+
+def column_kind(df: pd.DataFrame, col: str, parsed_structure: dict | None = None) -> str:
+    """Тип столбца из уже посчитанной структуры, иначе classify_column."""
+    if parsed_structure:
+        for item in parsed_structure.get("columns", []):
+            if item.get("name") == col:
+                return item.get("kind") or classify_column(df, col)
+    return classify_column(df, col)
 
 
 def _human_type(kind: str, dtype) -> str:
@@ -303,36 +299,36 @@ def _compute_numeric(series: pd.Series, metrics: list[str]) -> dict:
             if metric == "count":
                 result[metric] = int(s.count())
             elif metric == "mean":
-                result[metric] = _safe_float(s.mean())
+                result[metric] = safe_float(s.mean())
             elif metric == "median":
-                result[metric] = _safe_float(s.median())
+                result[metric] = safe_float(s.median())
             elif metric == "mode":
                 mode_vals = s.mode()
-                result[metric] = _safe_float(mode_vals.iloc[0]) if not mode_vals.empty else None
+                result[metric] = safe_float(mode_vals.iloc[0]) if not mode_vals.empty else None
             elif metric == "std":
-                result[metric] = _safe_float(s.std())
+                result[metric] = safe_float(s.std())
             elif metric == "var":
-                result[metric] = _safe_float(s.var())
+                result[metric] = safe_float(s.var())
             elif metric == "min":
-                result[metric] = _safe_float(s.min())
+                result[metric] = safe_float(s.min())
             elif metric == "max":
-                result[metric] = _safe_float(s.max())
+                result[metric] = safe_float(s.max())
             elif metric == "quantile_25":
-                result[metric] = _safe_float(s.quantile(0.25))
+                result[metric] = safe_float(s.quantile(0.25))
             elif metric == "quantile_75":
-                result[metric] = _safe_float(s.quantile(0.75))
+                result[metric] = safe_float(s.quantile(0.75))
             elif metric == "quantile_90":
-                result[metric] = _safe_float(s.quantile(0.90))
+                result[metric] = safe_float(s.quantile(0.90))
             elif metric == "quantile_95":
-                result[metric] = _safe_float(s.quantile(0.95))
+                result[metric] = safe_float(s.quantile(0.95))
             elif metric == "skew":
-                result[metric] = _safe_float(s.skew())
+                result[metric] = safe_float(s.skew())
             elif metric == "kurtosis":
-                result[metric] = _safe_float(s.kurtosis())
+                result[metric] = safe_float(s.kurtosis())
             elif metric == "mad":
-                result[metric] = _safe_float((s - s.mean()).abs().mean())
+                result[metric] = safe_float((s - s.mean()).abs().mean())
             elif metric == "iqr":
-                result[metric] = _safe_float(s.quantile(0.75) - s.quantile(0.25))
+                result[metric] = safe_float(s.quantile(0.75) - s.quantile(0.25))
             else:
                 result[metric] = None
         except Exception as exc:

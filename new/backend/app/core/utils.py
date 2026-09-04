@@ -5,6 +5,25 @@ import numpy as np
 import pandas as pd
 
 
+def safe_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+        if np.isnan(f) or np.isinf(f):
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None
+
+
+def safe_round(value, digits: int = 4):
+    f = safe_float(value)
+    if f is None:
+        return None
+    return round(f, digits)
+
+
 def extract_python_code(markdown_text) -> str:
     if not isinstance(markdown_text, str):
         return str(markdown_text)

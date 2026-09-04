@@ -9,8 +9,7 @@ import ErrorAlert from './components/ErrorAlert'
 import HistoryModal from './components/HistoryModal'
 import SettingsModal from './components/SettingsModal'
 import UploadSection from './components/UploadSection'
-import PipelineStepper from './components/PipelineStepper'
-import StatsCards from './components/StatsCards'
+import ProgressPanel from './components/ProgressPanel'
 import ResultsPanel from './components/results/ResultsPanel'
 import './App.css'
 
@@ -223,40 +222,11 @@ export default function App() {
 
                 <ErrorAlert message={error} />
 
-                {job && (
-                  <motion.section
-                    className="panel progress-panel"
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                  >
-                    <div className="panel-header">
-                      <div>
-                        <h2>Прогресс анализа</h2>
-                        <p className="progress-msg">{job.message}</p>
-                      </div>
-                      <span className={`status-pill ${job.status}`}>
-                        {job.status === 'running' ? 'Выполняется' :
-                         job.status === 'completed' ? 'Завершено' : 'Ошибка'}
-                      </span>
-                    </div>
-
-                    <StatsCards
-                      shape={results?.shape}
-                      tableCount={results?.table_count || results?.tables?.length}
-                      progress={job.progress}
-                      graphCount={job.graph_count}
-                      elapsed={loading || job.status === 'completed' ? formatElapsed(elapsed) : null}
-                    />
-
-                    <PipelineStepper
-                      currentStep={job.step}
-                      progress={job.progress}
-                      status={job.status}
-                    />
-
-                    {job.error && <ErrorAlert message={job.error} />}
-                  </motion.section>
-                )}
+                <ProgressPanel
+                  job={job}
+                  results={results}
+                  elapsed={job && (loading || job.status === 'completed') ? formatElapsed(elapsed) : null}
+                />
               </div>
 
               <div className="right-col">

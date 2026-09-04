@@ -2,224 +2,208 @@
 
 Точка входа: `run_analysis_pipeline(job_id, store)` в `new/backend/app/core/pipeline.py`.
 
-Запускается как фоновая задача после `POST /api/analyze`.
+Запускается как фоновая задача после `POST /api/analyze`. Оркестратор только вызывает шаги из `pipeline_steps.py` и в конце `store.complete` / `store.fail`. Общий объект шагов — `PipelineContext` (job, store, таблицы, накопленный `state`).
+
+Тяжёлый pandas/matplotlib выполняется в `asyncio.to_thread`. Расчёт по одной таблице — `structure_and_analyze` → `analyze_one_table` в `pipeline_helpers.py` (структура, качество, инсайты и метрики считаются **сразу**, UI узнаёт о них поэтапно).
 
 ## Сводная таблица этапов
 
-| # | `step` (ID) | Прогресс | Движок | Основные функции |
-|---|-------------|----------|--------|------------------|
-| 1 | `preparing` | 5→10 | Python | `load_dataframe` |
-| 2 | `structure_analysis` | 18→25 | Python | `analyze_data_structure`, `build_structure_xlsx` |
-| 3 | `data_insights` | 28→30 | Python | `preprocess_dates_based_on_llm`, `build_quality_report`, `compute_correlations` |
-| 4 | `metrics_plan` | 32→38 | Python | `build_metrics_plan` |
-| 5 | `metrics_calculation` | 45→55 | Python | `compute_metrics` |
-| 6 | `metrics_analysis` | 60→65 | **LLM** | `chain_invoke(DATA_ANALYZE)` |
-| 7 | `hypotheses_generation` | 68→72 | **LLM** | `chain_invoke(DATA_HYPOTHESES)`, `parse_hypotheses` |
-| 8 | `viz_generation` | 74→82 | Python + I/O | `generate_visualizations` ∥ сохранение отчётов |
-| 9 | `visualization` / `final_report` | 86→92 | Python | `build_final_report` |
+| # | `step` (ID для UI) | Прогресс | Движок | Функция |
+|---|--------------------|----------|--------|---------|
+| 1 | `preparing` | 5→10 | Python | `step_prepare` |
+| 2 | `structure_analysis` | 18→25 | Python | `step_structure` |
+| 3 | `data_insights` | 28→30 | Python | `step_insights` |
+| 4 | `scientific_discovery` | 31→34 | Python | `step_discovery` |
+| 5 | `metrics_plan` / `metrics_calculation` | 36→55 | Python | `step_metrics` |
+| 6 | `metrics_analysis` | 60→65 | **LLM** ∥ Python-графики | `step_analysis_and_visualizations` |
+| 7 | `hypotheses_generation` | 72 | Python (уже готово) | те же гипотезы, что на шаге 4 |
+| 8 | `viz_generation` | 74→82 | Python | сохранение PNG/DOCX графиков |
+| 9 | `final_report` | 86→92 | Python | `step_final_report` |
 | 10 | `completed` | 100 | — | `store.complete` |
 
-## Диаграмма потока данных
+Степпер UI (`PIPELINE_STEPS` в `constants.js`) должен совпадать с этими `step`. Есть также id `visualization` в степпере — исторический ярлык «Отчёт»; бэкенд пишет `final_report`.
+
+## Диаграмма потока
 
 ```mermaid
 flowchart TD
-    A[Файл CSV/XLSX] --> B[DataFrame]
-    B --> C[Структура столбцов]
-    C --> D[Препроцессинг дат]
+    A[CSV / XLSX, до 10 файлов] --> B[Таблицы: лист Excel = отдельная таблица]
+    B --> C[Связи join/union — только отчёт, без merge]
+    B --> D[Для каждой таблицы: структура]
     D --> E[Качество + корреляции]
-    E --> F[План метрик]
-    F --> G[Расчёт метрик]
-    G --> H[LLM: интерпретация]
-    H --> I[LLM: гипотезы]
-    I --> J[Графики PNG]
-    I --> K[DOCX анализ + гипотезы]
-    J --> L[Итоговый отчёт]
-    K --> L
-    L --> M[DOCX/TXT финал]
+    E --> F[Инсайты и гипотезы Python]
+    F --> G[План и расчёт метрик]
+    F --> H[Графики PNG]
+    F --> I[LLM: 6–8 предложений комментария]
+    G --> J[Итоговый отчёт DOCX/TXT]
+    H --> J
+    I --> J
+    F --> J
 ```
 
 ---
 
 ## Этап 1. Подготовка (`preparing`)
 
-**Цель:** загрузить таблицу и отдать превью в UI.
+**Цель:** загрузить таблицы и отдать превью в UI.
 
-1. `load_tables(file_entries)` — CSV и XLSX (каждый лист Excel — отдельная таблица).
-2. `detect_relations` — поиск ключей join (имена + пересечение значений) и одинаковых схем (union). Таблицы **не объединяются**.
-3. `select_analysis_table` — для метрик и графиков берётся самая большая таблица.
-4. Проверка: выбранный DataFrame не пустой.
-5. В `state`:
-   - `preview` / `columns` / `shape` — таблица, по которой считаются метрики и графики;
-   - `tables` — превью и метаданные каждой исходной таблицы;
-   - `relations` / `relations_raw` — найденные связи (вкладка «Связи таблиц»).
+1. `job_file_entries` — список `(path, original_name)` из `job.file_paths`.
+2. `load_tables` — CSV (utf-8 → latin1 → cp1251) и XLSX (каждый непустой лист — таблица). Лимит таблиц: `MAX_TABLES = 20`.
+3. `tables_meta` — превью 20 строк на таблицу без самого DataFrame в JSON.
+4. `detect_relations` — кандидаты join (имена столбцов + пересечение значений) и union (похожие схемы). **Таблицы не объединяются.**
+5. Если все таблицы пустые — `ValueError`, задача падает.
+
+В `state`:
+
+- `preview` / `columns` / `shape` — **первая** таблица (для совместимости старого UI);
+- `tables`, `table_count`;
+- `relations`, `relations_raw`.
+
+Файл: `output/relations.txt`.
 
 ---
 
 ## Этап 2. Структура (`structure_analysis`)
 
-**Модуль:** `core/data_analysis.py` → `analyze_data_structure(df)`
+Для каждой таблицы параллельно: `structure_and_analyze`.
 
-Для каждого столбца определяется:
+`analyze_data_structure(df)` в `data_analysis.py` ставит `kind`:
 
 | `kind` | Критерии (упрощённо) |
 |--------|----------------------|
-| `numeric` | Числовой dtype |
+| `numeric` | Числовой dtype, не похож на ID |
 | `categorical` | Низкая кардинальность / object |
-| `datetime` | Успешный parse даты |
+| `datetime` | dtype datetime или успешный parse + подсказка в имени |
 | `boolean` | True/False, 0/1 |
-| `identifier` | Почти все значения уникальны |
+| `identifier` | Имя вроде id/key и почти все значения уникальны |
 | `textual` | Длинные строки, высокая кардинальность |
 
-**Выход:**
-- `data_structure` — JSON `{columns: [...], datetime_candidates: [...]}`;
-- `data_structure_raw` — человекочитаемый текст;
-- файл `output/data_structure.xlsx` (цветные бейджи типов).
+В том же вызове уже считаются качество, discovery и метрики (`analyze_one_table`), но в UI на этом шаге отдаётся структура.
+
+Обработанные DataFrame пишутся в `analysis_df.pkl` рядом с `output/` — песочница кода читает их позже.
+
+Файл: `output/data_structure.xlsx` (по первой таблице).
+
+При одной таблице в `state`: `data_structure`, `data_structure_raw`. При нескольких — смотреть `tables[i].structure`.
 
 ---
 
-## Этап 3. Качество и связи (`data_insights`)
+## Этап 3. Качество и связи столбцов (`data_insights`)
 
-**Препроцессинг:** `preprocess_dates_based_on_llm` — приводит кандидатов в datetime.
+Тексты качества и корреляций уже посчитаны. Шаг склеивает блоки `=== имя таблицы ===`.
 
 ### Отчёт качества (`build_quality_report`)
 
 - Общий балл 0–100 и грейд (`good` / `fair` / `poor`).
-- По столбцам: пропуски %, уникальность, флаги проблем (`high_missing`, `constant`, `likely_identifier`, …).
+- По столбцам: пропуски %, уникальность, флаги (`high_missing`, `constant`, `likely_identifier`, …).
 
 ### Корреляции (`compute_correlations`)
 
-| Тип связи | Метрика |
-|-----------|---------|
+| Пара | Метрика |
+|------|---------|
 | Число ↔ число | Pearson *r* |
 | Категория ↔ категория | Cramér's *V* |
 | Категория → число | η (eta) |
 
-Сохраняются `quality_report.txt`, `correlations.txt`, `quality_insights.xlsx` (текст + JSON-блок после `---JSON---`).
+Файлы: `quality_report.txt`, `correlations.txt`, `quality_insights.xlsx`.
 
-В `state` также появляется `insights_report_raw` — объединённый текст для вкладки «Качество».
-
----
-
-## Этап 4. План метрик (`metrics_plan`)
-
-**Функция:** `build_metrics_plan(df, parsed_structure)`
-
-По типу столбца назначается фиксированный набор метрик, например:
-
-- **numeric:** mean, median, std, min, max, skew, …
-- **categorical:** unique, top, freq, …
-- **datetime:** min, max, range_days, …
-
-**Выход:** `metrics_plan_dict` — `{column_name: [metric, ...]}`.
+В `state`: `quality_report` / `correlations` (если таблица одна), плюс `*_raw` и `insights_report_raw`.
 
 ---
 
-## Этап 5. Расчёт метрик (`metrics_calculation`)
+## Этап 4. Инсайты и гипотезы (`scientific_discovery`)
 
-1. `format_calculation_code_reference` — псевдокод для вкладки «Код» (не исполняемый LLM-код).
-2. `compute_metrics(df, plan)` — реальный расчёт в Python.
-3. `format_metrics_results` — текст для UI и LLM.
-4. Файл `generated_calculation_code.py` — справочная запись.
+**Модуль:** `core/scientific_discovery.py` → `discover_insights`.
 
----
+По именам столбцов назначаются роли: geo, money, currency, area, numeric, categorical, datetime, identifier.
 
-## Этап 6. Анализ метрик (`metrics_analysis`) — LLM
+Дальше детерминированные проверки, например:
 
-**Промпт:** `DATA_ANALYZE` (`core/prompts.py`)
+- **concentration** — ядро категорий, покрывающее ~80% строк, и периферия (редкие значения, в т.ч. «города вне основной области»);
+- **numeric_outlier** — IQR и modified z-score;
+- **implausible** — подозрительные деньги/площади (нули, отрицательные);
+- **label_duplicates** — почти одинаковые подписи;
+- **group_profiles** — медианы чисел по группам;
+- **tests** — Spearman / Kruskal по сильным связям.
 
-**Вход (с усечением):**
-- `metrics_results_raw` — до 8000 символов;
-- `quality_report_raw` — до 4000;
-- `correlations_raw` — до 4000.
+`hypotheses_from_discovery` превращает находки в список объектов (до 14 на таблицу). Если таблиц несколько, добавляются гипотезы из `relations_hypotheses` (найденный ключ join и т.п.).
 
-**Ожидаемый формат ответа:** блоки вида `**Столбец** — интерпретация` на русском.
+Поля гипотезы: `id`, `kind`, `kind_label`, `title`, `statement`, `rationale`, `columns`, `verification`, `priority`, `source: "python"`.
 
-**Выход:** `analysis_summary` → UI вкладка «Анализ», DOCX.
-
----
-
-## Этап 7. Гипотезы (`hypotheses_generation`) — LLM
-
-**Промпт:** `DATA_HYPOTHESES`
-
-**Вход:** структура, метрики, качество, корреляции, краткий анализ.
-
-**Формат ответа:** JSON-массив между маркерами `---HYPOTHESES_START---` / `---JSON---` / `---HYPOTHESES_END---`.
-
-**Парсинг:** `parse_hypotheses` → список объектов:
-
-```json
-{
-  "id": "H1",
-  "title": "...",
-  "statement": "...",
-  "rationale": "...",
-  "columns": ["col_a", "col_b"],
-  "verification": "...",
-  "priority": "high|medium|low"
-}
-```
+Файл: `discovery_insights.txt`. В `state`: `discovery`, `discovery_brief`, `discovery_raw`, `hypotheses`. Вкладка «Инсайты» дописывает discovery к отчёту качества.
 
 ---
 
-## Этап 8. Визуализация (`viz_generation`)
+## Этап 5. Метрики (`metrics_plan`, `metrics_calculation`)
 
-**Параллельно выполняются:**
+План уже построен в `analyze_one_table`. Шаг только публикует его в `state`.
 
-1. `generate_visualizations(df, output_dir, graph_count, correlations=..., parsed_structure=...)` — до N PNG:
-   - пропуски, heatmap корреляций, гистограммы, boxplot, bar, scatter, time series, violin (по наличию подходящих столбцов).
-2. `_save_reports_parallel` — TXT/DOCX анализа и гипотез.
+Примеры набора метрик по `kind`:
 
-**Выход:**
-- `plot_files[]`, `plot_details[]` (метаданные каждого графика: тип, столбцы, описание)
-- `viz_code` (описание логики), `generated_visualization_code.py`
-- `plots_report.docx` — DOCX-отчёт с встроенными PNG и пояснениями (`ensure_plots_report_docx`)
+- **numeric:** count, mean, median, std, min, max, квантили, skew, …
+- **categorical:** count, nunique, mode, …
+- **datetime:** min_date, max_date, date_range_days, …
+- **identifier:** count, nunique
+
+`format_calculation_code_reference` — **псевдокод** для вкладки «Код», не исполняемый LLM-скрипт.
+
+`compute_metrics` — реальный расчёт pandas.
+
+Файл: `generated_calculation_code.py`.
+
+Если ни у одной таблицы нет плана — ошибка, пайплайн падает.
 
 ---
 
-## Этап 9. Итоговый отчёт (`visualization` / `final_report`)
+## Этап 6–8. Анализ LLM + графики (`metrics_analysis` → `viz_generation`)
 
-**Функция:** `build_final_report(...)` — **без LLM**.
+В `step_analysis_and_visualizations` **параллельно**:
 
-Секции (8 блоков на русском):
+1. `run_all_visualizations` — для каждой таблицы свой лимит графиков (`split_graph_count`). PNG сначала во временной папке, потом копируются как `{table_id}__plot_001.png` при нескольких таблицах.
+2. `run_llm_analysis` — промпт `DATA_ANALYZE`: на вход усечённый `discovery_brief` и краткие связи таблиц. Ответ: 6–8 предложений на русском. Если Ollama падает — в UI идёт Python-бриф, задача **не** fail.
 
-1. Общая характеристика датасета
-2. Качество данных
-3. Ключевые метрики
-4. Интерпретация (из `analysis_summary`)
-5. Гипотезы
-6. Визуализации (список графиков)
-7. Рекомендации (правила из quality report)
-8. Ограничения анализа
+Гипотезы на этом шаге **не пересчитываются LLM**. `hypotheses` = python-список с этапа 4. Промпт `DATA_HYPOTHESES` в коде есть, но пайплайн его не вызывает.
 
-Сохранение: `final_report.txt`, `final_report.docx`.
+Затем:
+
+- DOCX/TXT анализа и гипотез (`save_analysis_reports`);
+- `generated_visualization_code.py`;
+- `plots_report.docx` (`ensure_plots_report_docx`).
+
+Графики (`visualization.py`): кандидаты ранжируются по важности столбца и по discovery (выбросы, ядро рынка). Типы: пропуски, heatmap, гистограмма, box, bar, scatter, time series, violin — что позволяет состав данных, до `graph_count`.
+
+---
+
+## Этап 9. Итоговый отчёт (`final_report`)
+
+`build_final_report` в `reports.py` — **без LLM**. Секции на русском: характеристика, качество, инсайты, метрики, интерпретация, гипотезы, графики, рекомендации, ограничения. Если таблиц > 1, явно сказано, что join не делался.
+
+Файлы: `final_report.txt`, `final_report.docx`.
 
 ---
 
 ## Обработка ошибок
 
-Любое необработанное исключение в `try/except` пайплайна:
+Любое исключение в `try/except` оркестратора:
 
 ```python
-await store.fail(job_id, str(e), state)
+await store.fail(job_id, str(e), ctx.state)
 ```
 
 - `status` → `failed`
-- `error` → текст ошибки
-- `results` → частично накопленный `state` (если был)
+- `error` → текст
+- `results` → то, что успели положить в `ctx.state`
 
-UI показывает ошибку в левой колонке и на шаге степпера.
+UI показывает ошибку слева и на текущем шаге степпера.
 
 ---
 
-## Неиспользуемый legacy-код
+## Модули, которые пайплайн не вызывает
 
-В `core/` остались модули из `ins_temp3.py`, **не вызываемые** текущим пайплайном:
+| Модуль / промпт | Зачем оставлен |
+|-----------------|----------------|
+| `DATA_HYPOTHESES` | Черновик «перефразировать python-гипотезы»; не подключён |
+| `STRUCT_ANALYZE`, `M_PLAN`, `CODE_GEN`, `VIZ_GEN`, `FINAL_REP` | Legacy LLM-heavy пайплайн |
+| `parsers.py`, `code_runner.py` | Если ещё лежат в `core/` — не часть текущего потока |
 
-| Модуль | Назначение (legacy) |
-|--------|---------------------|
-| `parsers.py` | Парсинг LLM-ответов структуры/метрик |
-| `code_runner.py` | Выполнение LLM-кода метрик |
-| `prompts.py` | `STRUCT_ANALYZE`, `M_PLAN`, `CODE_GEN`, `VIZ_GEN`, `FINAL_REP` |
-
-Их можно удалить или оставить для экспериментов.
+Не путать с песочницей: `sandbox.py` вызывается только из `POST /api/jobs/{id}/run-code` по кнопке пользователя.

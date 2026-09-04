@@ -1,0 +1,333 @@
+/* ─── Upload shell (hero → dock) ─── */
+.upload-shell--hero {
+  width: 100%;
+  max-width: 640px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hero-alert {
+  margin-top: 4px;
+}
+
+.upload-shell--dock {
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.upload-panel {
+  background: var(--surface);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.upload-shell--hero .upload-panel {
+  padding: 40px 36px 36px;
+  box-shadow: var(--shadow-md);
+}
+
+.upload-shell--dock .upload-panel {
+  padding: 20px 22px 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.upload-hero-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.upload-hero-title {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--gray-900);
+  line-height: 1.15;
+  margin-bottom: 12px;
+}
+
+.upload-hero-subtitle {
+  font-size: var(--text-base);
+  color: var(--gray-500);
+  line-height: 1.55;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.upload-compact-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.upload-hero-features {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 0;
+}
+
+.upload-hero-features li {
+  padding: 8px 14px;
+  font-size: var(--text-sm);
+  color: var(--gray-600);
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 999px;
+}
+
+/* ─── Upload ─── */
+.dropzone {
+  border: 2px dashed var(--gray-300);
+  border-radius: var(--radius-md);
+  text-align: left;
+  background: var(--gray-50);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.25s;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.dropzone--hero {
+  padding: 48px 32px;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  min-height: 220px;
+  justify-content: center;
+}
+
+.dropzone--hero .dropzone-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dropzone--hero.dragover {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gray-400) 25%, transparent);
+  transform: scale(1.01);
+}
+
+.dropzone--compact {
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  min-height: 0;
+}
+
+.dropzone--compact .dropzone-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.dropzone--compact .dropzone-icon {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.dropzone--compact .dropzone-hint {
+  margin: 0;
+}
+
+.dropzone--compact .file-info {
+  width: 100%;
+}
+
+.dropzone--compact .file-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.options-row--compact {
+  margin-bottom: 12px;
+}
+
+.options-row--compact .option-label select {
+  padding: 10px 12px;
+}
+
+.btn-primary--hero {
+  width: 100%;
+  padding: 16px 24px;
+  font-size: var(--text-base);
+}
+
+.btn-primary--compact {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: var(--text-sm);
+}
+
+.dropzone:hover,
+.dropzone.dragover {
+  border-color: var(--gray-500);
+  background: var(--gray-100);
+}
+
+.dropzone.has-file {
+  border-style: solid;
+  border-color: var(--gray-300);
+  cursor: default;
+  padding: 20px;
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.file-list .file-info {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.file-list .file-info:last-of-type {
+  border-bottom: none;
+}
+
+.file-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 8px 12px;
+  border: 1px dashed var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--gray-600);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.file-add-btn:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-400);
+}
+
+.upload-file-count {
+  margin: -8px 0 16px;
+  font-size: var(--text-sm);
+  color: var(--gray-500);
+}
+
+.dropzone--compact .file-list {
+  max-height: 140px;
+}
+
+.dropzone input { display: none; }
+
+.dropzone-icon {
+  color: var(--gray-400);
+  margin-bottom: 16px;
+}
+
+.dropzone-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--gray-800);
+  margin-bottom: 8px;
+}
+
+.dropzone-hint {
+  font-size: var(--text-sm);
+  color: var(--gray-400);
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.file-icon { color: var(--gray-600); flex-shrink: 0; }
+
+.file-meta { flex: 1; text-align: left; }
+
+.file-meta strong {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.file-meta span {
+  font-size: var(--text-sm);
+  color: var(--gray-500);
+}
+
+.icon-btn {
+  background: var(--gray-100);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  cursor: pointer;
+  color: var(--gray-600);
+  transition: background 0.15s;
+}
+
+.icon-btn:hover { background: var(--gray-200); }
+
+.options-row { margin-bottom: 20px; }
+
+.option-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.option-label select {
+  padding: 12px 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  color: var(--gray-800);
+  cursor: pointer;
+}
+
+.btn-primary {
+  width: 100%;
+  padding: 16px 28px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

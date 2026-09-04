@@ -4,7 +4,7 @@ import logging
 import shutil
 import uuid
 from dataclasses import asdict, dataclass, field, fields
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,10 @@ from .config import JOBS_DIR
 from .core.utils import convert_numpy_types
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 @dataclass
@@ -28,8 +32,8 @@ class Job:
     message: str = "Ожидание запуска"
     error: str | None = None
     results: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=_utc_now)
+    updated_at: str = field(default_factory=_utc_now)
     file_paths: list[str] = field(default_factory=list)
     filenames: list[str] = field(default_factory=list)
     analysis_path: str = ""
@@ -256,7 +260,7 @@ class JobStore:
             job.message = message
             if partial:
                 job.results = {**job.results, **partial}
-            job.updated_at = datetime.utcnow().isoformat()
+            job.updated_at = _utc_now()
             self._save_to_disk(job)
         await self._notify(job_id)
 
@@ -270,7 +274,7 @@ class JobStore:
             job.progress = 100
             job.message = "Анализ завершён"
             job.results = results
-            job.updated_at = datetime.utcnow().isoformat()
+            job.updated_at = _utc_now()
             self._save_to_disk(job)
         await self._notify(job_id)
 
@@ -284,7 +288,7 @@ class JobStore:
             job.message = f"Ошибка: {error}"
             if partial_results:
                 job.results = {**job.results, **partial_results}
-            job.updated_at = datetime.utcnow().isoformat()
+            job.updated_at = _utc_now()
             self._save_to_disk(job)
         await self._notify(job_id)
 
@@ -298,7 +302,7 @@ class JobStore:
             if not job:
                 return None
             job.results = {**(job.results or {}), **partial}
-            job.updated_at = datetime.utcnow().isoformat()
+            job.updated_at = _utc_now()
             self._save_to_disk(job)
         await self._notify(job_id)
         return job

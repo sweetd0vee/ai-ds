@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .data_analysis import classify_column
-from .utils import convert_numpy_types
+from .utils import convert_numpy_types, safe_round as _round
 
 logger = logging.getLogger(__name__)
 
@@ -31,25 +31,6 @@ CARDINALITY_LABELS = {
     "N:1": "многие к одному",
     "N:M": "многие ко многим",
 }
-
-
-def _safe_float(value) -> float | None:
-    if value is None:
-        return None
-    try:
-        f = float(value)
-        if np.isnan(f) or np.isinf(f):
-            return None
-        return f
-    except (TypeError, ValueError):
-        return None
-
-
-def _round(value, digits: int = 4):
-    f = _safe_float(value)
-    if f is None:
-        return None
-    return round(f, digits)
 
 
 def _normalize_name(name: str) -> str:

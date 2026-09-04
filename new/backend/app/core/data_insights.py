@@ -7,26 +7,14 @@ import json
 import numpy as np
 import pandas as pd
 
-from .data_analysis import classify_column
-from .utils import convert_numpy_types
+from .data_analysis import column_kind
+from .utils import convert_numpy_types, safe_float
 
 TOP_NUMERIC_PAIRS = 15
 TOP_CATEGORICAL_PAIRS = 10
 TOP_CAT_NUMERIC = 10
 MAX_CAT_CARDINALITY = 40
 MAX_CAT_COLS = 8
-
-
-def _safe_float(value) -> float | None:
-    if value is None:
-        return None
-    try:
-        f = float(value)
-        if np.isnan(f) or np.isinf(f):
-            return None
-        return f
-    except (TypeError, ValueError):
-        return None
 
 
 def _strength_label(value: float, *, strong: float = 0.7, moderate: float = 0.4) -> str:
@@ -76,11 +64,7 @@ CORRELATION_HELP = {
 
 
 def _column_kind(df: pd.DataFrame, col: str, parsed_structure: dict | None) -> str:
-    if parsed_structure:
-        for item in parsed_structure.get("columns", []):
-            if item.get("name") == col:
-                return item.get("kind") or classify_column(df, col)
-    return classify_column(df, col)
+    return column_kind(df, col, parsed_structure)
 
 
 def _chi2_statistic(table: np.ndarray) -> float:
@@ -110,7 +94,7 @@ def _cramers_v(series_a: pd.Series, series_b: pd.Series) -> float | None:
     min_dim = min(table.shape) - 1
     if min_dim <= 0 or n == 0:
         return None
-    return _safe_float(np.sqrt(chi2 / (n * min_dim)))
+    return safe_float(np.sqrt(chi2 / (n * min_dim)))
 
 
 def _correlation_ratio(categories: pd.Series, values: pd.Series) -> float | None:
@@ -127,7 +111,7 @@ def _correlation_ratio(categories: pd.Series, values: pd.Series) -> float | None
         len(group) * (group.mean() - grand_mean) ** 2
         for _, group in frame.groupby("cat")["val"]
     )
-    return _safe_float(np.sqrt(ss_between / ss_total))
+    return safe_float(np.sqrt(ss_between / ss_total))
 
 
 def build_quality_report(df: pd.DataFrame, parsed_structure: dict | None = None) -> dict:
@@ -262,7 +246,7 @@ def compute_correlations(df: pd.DataFrame, parsed_structure: dict | None = None)
         corr = numeric_df.corr(method="pearson", min_periods=10)
         for i, col_a in enumerate(numeric_cols):
             for col_b in numeric_cols[i + 1:]:
-                r = _safe_float(corr.loc[col_a, col_b])
+                r = safe_float(corr.loc[col_a, col_b])
                 if r is None:
                     continue
                 numeric_pairs.append({

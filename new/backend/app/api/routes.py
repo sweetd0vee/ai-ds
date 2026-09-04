@@ -7,11 +7,23 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 
+from .artifacts import (
+    ALLOWED_DOWNLOADS,
+    ensure_download_file,
+    file_response,
+    require_job,
+)
 from ..config import JOBS_DIR, settings
+from ..core.hypotheses import append_auditor_hypothesis
+from ..core.hypotheses_export import (
+    build_hypotheses_docx,
+    build_hypotheses_xlsx,
+    filter_hypotheses_by_ids,
+)
 from ..core.loaders import ALLOWED_EXTS, MAX_UPLOAD_FILES
 from ..core.pipeline import run_analysis_pipeline
-from ..jobs import JobStore
 from ..core.sandbox import run_sandbox_code
+from ..jobs import JobStore
 from ..models import (
     AppConfigResponse,
     HypothesisCreateRequest,
@@ -181,19 +193,13 @@ async def delete_job(job_id: str):
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
-
+    job = require_job(job_store, job_id)
     return JobStatusResponse(**job_store.to_dict(job))
 
 
 @router.get("/jobs/{job_id}/stream")
 async def stream_job_status(job_id: str):
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
-
+    job = require_job(job_store, job_id)
     queue = job_store.subscribe(job_id)
 
     async def event_generator():
@@ -219,9 +225,7 @@ async def stream_job_status(job_id: str):
 
 @router.get("/jobs/{job_id}/plots/{filename}")
 async def get_plot(job_id: str, filename: str):
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
+    job = require_job(job_store, job_id)
 
     if not filename.startswith("plot_") or not filename.endswith(".png"):
         raise HTTPException(400, "Недопустимое имя файла")
@@ -235,9 +239,7 @@ async def get_plot(job_id: str, filename: str):
 
 @router.post("/jobs/{job_id}/run-code", response_model=RunCodeResponse)
 async def run_job_code(job_id: str, body: RunCodeRequest):
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
+    job = require_job(job_store, job_id)
 
     if not job.file_path and not job.file_paths:
         raise HTTPException(400, "Файл задачи не найден")
@@ -263,13 +265,9 @@ async def run_job_code(job_id: str, body: RunCodeRequest):
 
 @router.post("/jobs/{job_id}/hypotheses", response_model=JobStatusResponse)
 async def add_hypothesis(job_id: str, body: HypothesisCreateRequest):
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
+    job = require_job(job_store, job_id)
     if job.status in ("running", "pending"):
         raise HTTPException(409, "Дождитесь окончания анализа, затем добавьте гипотезу")
-
-    from ..core.hypotheses import append_auditor_hypothesis
 
     existing = (job.results or {}).get("hypotheses") or []
     try:
@@ -285,20 +283,12 @@ async def add_hypothesis(job_id: str, body: HypothesisCreateRequest):
 
 @router.post("/jobs/{job_id}/hypotheses/export")
 async def export_hypotheses(job_id: str, body: HypothesesExportRequest):
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
+    job = require_job(job_store, job_id)
 
     hypotheses = job.results.get("hypotheses") or [] if job.results else []
     raw = job.results.get("hypotheses_raw") or "" if job.results else ""
     if not hypotheses and not raw:
         raise HTTPException(404, "Гипотезы не найдены")
-
-    from ..core.hypotheses_export import (
-        build_hypotheses_docx,
-        build_hypotheses_xlsx,
-        filter_hypotheses_by_ids,
-    )
 
     if hypotheses:
         if not body.ids:
@@ -339,139 +329,9 @@ async def export_hypotheses(job_id: str, body: HypothesesExportRequest):
 
 @router.get("/jobs/{job_id}/download/{filename}")
 async def download_file(job_id: str, filename: str):
-    allowed = {
-        "final_report.txt", "final_report.docx",
-        "analysis_summary_report.txt", "analysis_summary_report.docx",
-        "hypotheses_report.docx",
-        "hypotheses_report.xlsx",
-        "plots_report.docx",
-        "generated_calculation_code.py", "generated_visualization_code.py",
-        "quality_report.txt", "correlations.txt",
-        "quality_insights.xlsx",
-        "data_structure.xlsx",
-        "relations.txt",
-    }
-    if filename not in allowed:
+    if filename not in ALLOWED_DOWNLOADS:
         raise HTTPException(400, "Файл недоступен для скачивания")
 
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "Задача не найдена")
-
-    file_path = Path(job.output_dir) / filename
-    if filename == "data_structure.xlsx" and not file_path.exists():
-        structure = job.results.get("data_structure")
-        if not structure:
-            raise HTTPException(404, "Структура данных не найдена")
-        from ..core.structure_export import build_structure_xlsx
-
-        try:
-            build_structure_xlsx(structure, file_path)
-        except Exception as exc:
-            logger.exception("Failed to build data_structure.xlsx for job %s", job_id)
-            raise HTTPException(500, f"Не удалось сформировать XLSX: {exc}") from exc
-    elif filename == "quality_insights.xlsx" and not file_path.exists():
-        quality = job.results.get("quality_report")
-        correlations = job.results.get("correlations")
-        if not quality or not correlations:
-            raise HTTPException(404, "Отчёт о качестве не найден")
-        from ..core.quality_export import build_quality_xlsx
-
-        try:
-            build_quality_xlsx(
-                quality,
-                correlations,
-                file_path,
-                source_file=job.filename,
-            )
-        except Exception as exc:
-            logger.exception("Failed to build quality_insights.xlsx for job %s", job_id)
-            raise HTTPException(500, f"Не удалось сформировать XLSX: {exc}") from exc
-    elif filename == "analysis_summary_report.docx":
-        analysis = job.results.get("analysis_summary")
-        if not analysis:
-            raise HTTPException(404, "Текст анализа не найден")
-        from ..core.analysis_export import build_analysis_docx
-
-        try:
-            build_analysis_docx(analysis, file_path, source_file=job.filename)
-        except Exception as exc:
-            logger.exception("Failed to build analysis_summary_report.docx for job %s", job_id)
-            raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
-    elif filename in ("hypotheses_report.docx", "hypotheses_report.xlsx"):
-        hypotheses = job.results.get("hypotheses") or []
-        raw = job.results.get("hypotheses_raw") or ""
-        if not hypotheses and not raw:
-            raise HTTPException(404, "Гипотезы не найдены")
-        from ..core.hypotheses_export import build_hypotheses_docx, build_hypotheses_xlsx
-
-        try:
-            if filename.endswith(".xlsx"):
-                build_hypotheses_xlsx(
-                    hypotheses,
-                    file_path,
-                    source_file=job.filename,
-                    raw_fallback=raw,
-                )
-            else:
-                build_hypotheses_docx(
-                    hypotheses,
-                    file_path,
-                    source_file=job.filename,
-                    raw_fallback=raw,
-                )
-        except Exception as exc:
-            logger.exception("Failed to build %s for job %s", filename, job_id)
-            kind = "XLSX" if filename.endswith(".xlsx") else "DOCX"
-            raise HTTPException(500, f"Не удалось сформировать {kind}: {exc}") from exc
-    elif filename == "plots_report.docx":
-        plot_files = job.results.get("plot_files") or []
-        if not plot_files:
-            raise HTTPException(404, "Графики не найдены")
-
-        from ..core.plots_export import ensure_plots_report_docx
-
-        parsed = job.results.get("data_structure") or {}
-        try:
-            await asyncio.to_thread(
-                ensure_plots_report_docx,
-                Path(job.output_dir),
-                plot_files,
-                plot_details=job.results.get("plot_details"),
-                source_file=job.filename,
-                correlations=job.results.get("correlations"),
-                viz_output=job.results.get("viz_output", ""),
-                dataset_path=job.file_path,
-                datetime_candidates=parsed.get("datetime_candidates") or [],
-            )
-        except Exception as exc:
-            logger.exception("Failed to build plots_report.docx for job %s", job_id)
-            raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
-    elif filename == "final_report.docx":
-        report = job.results.get("final_report")
-        if not report:
-            raise HTTPException(404, "Итоговый отчёт не найден")
-        from ..core.report_export import build_report_docx
-
-        try:
-            build_report_docx(report, file_path, source_file=job.filename)
-        except Exception as exc:
-            logger.exception("Failed to build final_report.docx for job %s", job_id)
-            raise HTTPException(500, f"Не удалось сформировать DOCX: {exc}") from exc
-    elif not file_path.exists():
-        raise HTTPException(404, "Файл не найден")
-
-    media_types = {
-        "data_structure.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "quality_insights.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "final_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "analysis_summary_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "hypotheses_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "hypotheses_report.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "plots_report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    }
-    return FileResponse(
-        file_path,
-        filename=filename,
-        media_type=media_types.get(filename),
-    )
+    job = require_job(job_store, job_id)
+    file_path = await ensure_download_file(job, filename)
+    return file_response(file_path, filename)

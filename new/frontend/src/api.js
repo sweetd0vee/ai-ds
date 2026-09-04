@@ -18,6 +18,24 @@ function triggerBlobDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+async function readJson(res) {
+  return res.json().catch(() => ({}))
+}
+
+async function fetchOk(url, options, fallback) {
+  const res = await fetch(url, options)
+  if (!res.ok) {
+    const err = await readJson(res)
+    throw new Error(parseApiDetail(err.detail, fallback) || fallback)
+  }
+  return res
+}
+
+async function fetchJson(url, options, fallback) {
+  const res = await fetchOk(url, options, fallback)
+  return readJson(res)
+}
+
 export async function fetchConfig() {
   const res = await fetch(`${API_BASE}/config`)
   if (!res.ok) throw new Error('Не удалось загрузить настройки сервера')
@@ -42,7 +60,7 @@ export async function startAnalysis(files, graphCount = 20, analystModel) {
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
+    const err = await readJson(res)
     throw new Error(parseApiDetail(err.detail, `Ошибка сервера (${res.status})`) || 'Ошибка запуска анализа')
   }
 
@@ -63,21 +81,11 @@ export async function fetchJobHistory() {
 }
 
 export async function deleteHistoryJob(jobId) {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}`, { method: 'DELETE' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(parseApiDetail(err.detail, 'Не удалось удалить запись'))
-  }
-  return res.json()
+  return fetchJson(`${API_BASE}/jobs/${jobId}`, { method: 'DELETE' }, 'Не удалось удалить запись')
 }
 
 export async function clearHistory() {
-  const res = await fetch(`${API_BASE}/jobs`, { method: 'DELETE' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(parseApiDetail(err.detail, 'Не удалось очистить историю'))
-  }
-  return res.json()
+  return fetchJson(`${API_BASE}/jobs`, { method: 'DELETE' }, 'Не удалось очистить историю')
 }
 
 export function streamJobStatus(jobId, onUpdate, onError) {
@@ -120,7 +128,7 @@ export async function downloadJobFile(jobId, filename) {
   if (!jobId) throw new Error('Задача не найдена')
   const res = await fetch(downloadUrl(jobId, filename))
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
+    const err = await readJson(res)
     throw new Error(parseApiDetail(err.detail, `Не удалось скачать файл (${res.status})`))
   }
   triggerBlobDownload(await res.blob(), filename)
@@ -128,15 +136,15 @@ export async function downloadJobFile(jobId, filename) {
 
 export async function addHypothesis(jobId, payload) {
   if (!jobId) throw new Error('Задача не найдена')
-  const res = await fetch(`${API_BASE}/jobs/${jobId}/hypotheses`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    throw new Error(parseApiDetail(data.detail, 'Не удалось добавить гипотезу'))
-  }
+  const data = await fetchJson(
+    `${API_BASE}/jobs/${jobId}/hypotheses`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    'Не удалось добавить гипотезу',
+  )
   return data
 }
 
@@ -149,24 +157,20 @@ export async function exportHypotheses(jobId, ids, format = 'xlsx') {
     body: JSON.stringify({ ids, format }),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
+    const err = await readJson(res)
     throw new Error(parseApiDetail(err.detail, `Не удалось скачать файл (${res.status})`))
   }
   triggerBlobDownload(await res.blob(), filename)
 }
 
 export async function runSandboxCode(jobId, code) {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}/run-code`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
-  })
-
-  const data = await res.json().catch(() => ({}))
-
-  if (!res.ok) {
-    throw new Error(parseApiDetail(data.detail, 'Ошибка выполнения кода'))
-  }
-
-  return data
+  return fetchJson(
+    `${API_BASE}/jobs/${jobId}/run-code`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    },
+    'Ошибка выполнения кода',
+  )
 }
