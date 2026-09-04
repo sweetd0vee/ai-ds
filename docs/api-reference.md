@@ -1,37 +1,26 @@
 # Справочник API
 
 Базовый URL: `/api`  
-Префикс роутера: `app/api/routes.py`  
-Интерактивная документация: http://localhost:8010/docs (dev) или http://localhost:8020/docs (Docker)
+Код: `app/api/routes.py`, скачивание — `app/api/artifacts.py`  
+OpenAPI: http://127.0.0.1:8021/docs (dev) или :8020 (Docker)
 
-## Общие соглашения
-
-- Формат ошибок FastAPI: `{"detail": "строка"}` или `{"detail": [{"msg": "..."}]}`.
-- Все ответы JSON, кроме файлов и SSE.
-- Идентификатор задачи — UUID v4.
+Ошибки FastAPI: `{"detail": "строка"}` или `{"detail": [{"msg": "..."}]}`.  
+Идентификатор задачи — UUID v4. JSON, кроме файлов и SSE.
 
 ---
 
 ## `GET /api/health`
 
-Проверка доступности сервера.
-
-**Ответ 200:**
-```json
-{ "status": "ok" }
-```
+`{"status":"ok"}`
 
 ---
 
 ## `GET /api/config`
 
-Список моделей для настроек UI.
-
-**Ответ 200:**
 ```json
 {
-  "analyst_models": ["qwen3:8b", "qwen3:4b", "..."],
-  "default_analyst_model": "qwen3:8b"
+  "analyst_models": ["qwen3.8:27b", "qwen3:4b", "..."],
+  "default_analyst_model": "qwen3.8:27b"
 }
 ```
 
@@ -39,20 +28,19 @@
 
 ## `POST /api/analyze`
 
-Запуск нового анализа.
+`multipart/form-data`
 
-**Content-Type:** `multipart/form-data`
-
-| Поле | Тип | Обязательно | Описание |
-|------|-----|-------------|----------|
-| `files` | file[] | да* | Один или несколько `.csv` / `.xlsx` (до 10) |
-| `file` | file | да* | Один файл (совместимость со старым клиентом) |
-| `graph_count` | int | нет | `10`, `15`, `20` или `30` (default: 20) |
-| `analyst_model` | string | нет | Должна быть в `analyst_models` |
+| Поле | Обязательно | Описание |
+|------|-------------|----------|
+| `files` | да* | До 10 файлов `.csv` / `.xlsx` |
+| `file` | да* | Один файл (старый клиент) |
+| `graph_count` | нет | 10, 15, 20 или 30 (default 20) |
+| `analyst_model` | нет | Должна быть в `analyst_models` |
 
 \* Нужен хотя бы один из `files` / `file`.
 
-**Ответ 200:**
+**200:**
+
 ```json
 {
   "job_id": "uuid",
@@ -63,129 +51,118 @@
 }
 ```
 
-**Ошибки:** 400 — неверный формат/модель/количество графиков.
+**400:** формат, модель, число графиков, больше 10 файлов.
 
-**Побочные эффекты:**
-- Файлы сохраняются в `data/jobs/{job_id}/inputs/`
-- Запускается `run_analysis_pipeline` в фоне
-- При нескольких таблицах ищутся ключи join/union, анализ идёт по объединённой выборке
+Файлы пишутся в `data/jobs/{id}/inputs/`, стартует `run_analysis_pipeline`. Таблицы **не** объединяются.
+
+---
+
+## `GET /api/jobs`
+
+Список задач с диска (история UI), новые сверху.
+
+**200:** `{ "jobs": [ JobListItem, ... ] }` — id, имена файлов, status, progress, модель, timestamps, rows/cols из `results.shape` если есть.
+
+---
+
+## `DELETE /api/jobs`
+
+Удаляет все папки в `JOBS_DIR`. `{ "deleted": N }`
+
+---
+
+## `DELETE /api/jobs/{job_id}`
+
+Удаляет одну задачу. **404**, если не найдена.
 
 ---
 
 ## `GET /api/jobs/{job_id}`
 
-Текущее состояние задачи (REST, без стриминга).
-
-**Ответ 200:** см. [Модель Job](data-model.md#ответ-api-jobstatusresponse)
-
-**Ошибки:** 404 — задача не найдена.
+Снимок Job. Форма — [data-model.md](data-model.md#ответ-api-jobstatusresponse). **404** если нет.
 
 ---
 
 ## `GET /api/jobs/{job_id}/stream`
 
-Server-Sent Events — поток обновлений задачи.
+`Content-Type: text/event-stream`
 
-**Headers ответа:**
-- `Content-Type: text/event-stream`
-- `Cache-Control: no-cache`
-
-**Формат события:**
 ```
 data: {"job_id":"...","status":"running","step":"metrics_plan",...}
 
 ```
 
-**Поведение:**
-1. Первое событие — текущий snapshot.
-2. Далее — при каждом изменении задачи.
-3. Keepalive каждые 30 с: `: keepalive\n\n`
-4. Поток закрывается при `completed` или `failed`.
-
-**Использование во frontend:** `EventSource('/api/jobs/{id}/stream')`.
+Первое событие — snapshot. Далее — на каждое изменение. Keepalive 30 с. Закрытие на `completed` / `failed`.
 
 ---
 
 ## `GET /api/jobs/{job_id}/plots/{filename}`
 
-Отдача PNG-графика.
-
-**Ограничения:** `filename` должен соответствовать `plot_*.png`.
-
-**Ответ:** `image/png` (FileResponse).
+PNG. Имя должно начинаться с `plot_` и заканчиваться `.png` (в т.ч. `orders__plot_001.png`).
 
 ---
 
 ## `POST /api/jobs/{job_id}/run-code`
 
-Песочница: выполнение пользовательского Python на датасете задачи.
-
-**Тело запроса:**
 ```json
 { "code": "print(df.shape)" }
 ```
 
-**Ответ 200:**
 ```json
-{
-  "success": true,
-  "output": "stdout текст",
-  "error": null,
-  "warnings": ["предупреждения static_code_analysis"]
-}
+{ "success": true, "output": "...", "error": null, "warnings": [] }
 ```
 
-**Контекст `exec`:**
-- `df` — препроцессированный DataFrame
-- `pd`, `np`
-- `metrics_plan`, `compute_metrics`, `format_metrics_results`
+В `exec`: `df` (из pickle или файла), `pd`, `np`, при нескольких таблицах — словарь кадров. Не для публичного интернета.
+
+---
+
+## `POST /api/jobs/{job_id}/hypotheses`
+
+Добавить гипотезу аудитора. Тело: `statement` обязателен; `title`, `rationale`, `verification`, `columns`, `priority`.
+
+**409**, если анализ ещё `running`/`pending`. Ответ — обновлённый Job.
+
+---
+
+## `POST /api/jobs/{job_id}/hypotheses/export`
+
+```json
+{ "ids": [1, 2, 3], "format": "xlsx" }
+```
+
+`format`: `xlsx` | `docx`. Нужен непустой `ids`, если список гипотез не пустой. Файл пишется в `output/` и отдаётся как download.
 
 ---
 
 ## `GET /api/jobs/{job_id}/download/{filename}`
 
-Скачивание артефакта анализа.
+Whitelist в `ALLOWED_DOWNLOADS` (`artifacts.py`):
 
-### Разрешённые файлы
-
-| Файл | Описание |
-|------|----------|
+| Файл | Содержание |
+|------|------------|
 | `final_report.txt` / `.docx` | Итоговый отчёт |
-| `analysis_summary_report.txt` / `.docx` | LLM-анализ метрик |
-| `hypotheses_report.txt` / `.docx` | Гипотезы |
-| `quality_report.txt` | Качество данных |
-| `correlations.txt` | Корреляции |
-| `quality_insights.xlsx` | Качество и связи (XLSX) |
-| `data_structure.xlsx` | Структура столбцов |
-| `plots_report.docx` | DOCX-отчёт с графиками и пояснениями |
-| `generated_calculation_code.py` | Справочный код метрик |
-| `generated_visualization_code.py` | Описание визуализации |
+| `analysis_summary_report.txt` / `.docx` | Текст анализа |
+| `hypotheses_report.docx` / `.xlsx` | Гипотезы |
+| `quality_report.txt`, `correlations.txt` | Качество / связи столбцов |
+| `quality_insights.xlsx` | Качество |
+| `data_structure.xlsx` | Типы столбцов |
+| `relations.txt` | Связи таблиц |
+| `plots_report.docx` | Графики + подписи |
+| `generated_calculation_code.py` | Псевдокод метрик |
+| `generated_visualization_code.py` | Описание графиков |
 
-### Генерация по запросу
-
-Если DOCX/XLSX отсутствует (старые задачи), сервер пересобирает:
-
-- `data_structure.xlsx` ← `build_structure_xlsx`
-- `quality_insights.xlsx` ← `build_quality_xlsx`
-- `analysis_summary_report.docx` ← `build_analysis_docx`
-- `hypotheses_report.docx` ← `build_hypotheses_docx`
-- `plots_report.docx` ← `ensure_plots_report_docx`
-- `final_report.docx` ← `build_report_docx`
+Если DOCX/XLSX нет (старый job), сервер пересобирает из `results`.
 
 ---
 
-## Пример полного цикла (curl)
+## Пример curl
 
 ```bash
-# 1. Запуск
-curl -X POST http://localhost:8010/api/analyze \
-  -F "file=@data.csv" \
+curl -X POST http://127.0.0.1:8021/api/analyze \
+  -F "files=@data.csv" \
   -F "graph_count=20" \
-  -F "analyst_model=qwen3:8b"
+  -F "analyst_model=qwen3.8:27b"
 
-# 2. Статус
-curl http://localhost:8010/api/jobs/{job_id}
-
-# 3. Скачать отчёт
-curl -O http://localhost:8010/api/jobs/{job_id}/download/final_report.docx
+curl http://127.0.0.1:8021/api/jobs/{job_id}
+curl -O http://127.0.0.1:8021/api/jobs/{job_id}/download/final_report.docx
 ```

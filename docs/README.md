@@ -1,6 +1,6 @@
 # Документация «Электронный Data Scientist»
 
-Актуальная версия — `new/`: FastAPI + React, Python-first пайплайн.
+Актуальная версия — корень репозитория: FastAPI + React, Python-first пайплайн.
 
 ## С чего начать
 
@@ -27,15 +27,15 @@
 
 | Путь | Статус | Описание |
 |------|--------|----------|
-| `new/` | **Активная** | FastAPI + React |
+| `backend/`, `frontend/` | **Активная** | FastAPI + React |
 | `old/ins_temp3.py` | Legacy | Streamlit + LLM пишет Python (`DOCUMENTATION.md` в корне) |
 
-Документы в этой папке описывают **только `new/`**, если не сказано иное.
+Документы в этой папке описывают **актуальную версию** (FastAPI + React), если не сказано иное.
 
 ## Быстрые ссылки
 
-- Backend: `new/backend/app/`
-- Frontend: `new/frontend/src/`
+- Backend: `backend/app/`
+- Frontend: `frontend/src/`
 - OpenAPI: http://127.0.0.1:8021/docs
 - UI (dev): http://localhost:5190
 - UI (Docker): http://localhost:8080

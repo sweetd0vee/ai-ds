@@ -2,7 +2,7 @@
 
 Сборка и запуск **backend (FastAPI)** и **frontend (React + nginx)** в контейнерах.
 
-Подробные README по частям: `new/docker/README.md`, `new/backend/docker/README.md`, `new/frontend/docker/README.md`.
+Подробные README по частям: `docker/README.md`, `backend/docker/README.md`, `frontend/docker/README.md`.
 
 ## Требования
 
@@ -10,8 +10,7 @@
 - **Ollama на хосте** — контейнеры обращаются к ней по `host.docker.internal:11434`
 
 ```powershell
-ollama pull qwen3:8b
-ollama pull qwen3-coder
+ollama pull qwen3.8:27b
 ```
 
 ## Быстрый старт (весь стек)
@@ -19,7 +18,7 @@ ollama pull qwen3-coder
 Запустите Docker Desktop и дождитесь статуса *Running*.
 
 ```powershell
-cd C:\Users\audit\Work\Arina\2026\ai-ds\new\docker
+cd C:\Users\audit\Work\Arina\2026\ai-ds\docker
 .\up.ps1
 ```
 
@@ -48,7 +47,7 @@ docker compose up -d
 
 ## Переменные окружения
 
-Файл `new/docker/.env` (из `.env.example`):
+Файл `docker/.env` (из `.env.example`):
 
 | Переменная | По умолчанию | Описание |
 |------------|--------------|----------|
@@ -68,7 +67,7 @@ docker compose up -d
 ### Backend
 
 ```powershell
-cd C:\Users\audit\Work\Arina\2026\ai-ds\new\backend
+cd C:\Users\audit\Work\Arina\2026\ai-ds\backend
 docker build -f docker/Dockerfile -t ai-ds-backend:latest .
 ```
 
@@ -78,7 +77,7 @@ docker build -f docker/Dockerfile -t ai-ds-backend:latest .
 ### Frontend
 
 ```powershell
-cd C:\Users\audit\Work\Arina\2026\ai-ds\new\frontend
+cd C:\Users\audit\Work\Arina\2026\ai-ds\frontend
 docker build -f docker/Dockerfile -t ai-ds-frontend:latest .
 ```
 

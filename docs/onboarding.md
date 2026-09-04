@@ -15,7 +15,7 @@
 
 Это не чат с данными и не Jupyter. Это фиксированный конвейер: одни и те же шаги для любого файла.
 
-Рабочая версия — только папка `new/`. `old/` и корневой `DOCUMENTATION.md` — legacy Streamlit, где LLM ещё писала и исполняла Python. Сейчас так **не работает**.
+Рабочая версия — `backend/` и `frontend/` в корне репозитория. `old/` и корневой `DOCUMENTATION.md` — legacy Streamlit, где LLM ещё писала и исполняла Python. Сейчас так **не работает**.
 
 ## Как думать о системе
 
@@ -23,9 +23,9 @@
 
 | Сущность | Где живёт | Зачем |
 |----------|-----------|--------|
-| **Job** | `new/backend/app/jobs.py` + диск `data/jobs/{uuid}/` | Одна сессия анализа: статус, прогресс, накопленные `results` |
+| **Job** | `backend/app/jobs.py` + диск `data/jobs/{uuid}/` | Одна сессия анализа: статус, прогресс, накопленные `results` |
 | **Pipeline** | `core/pipeline.py` → `pipeline_steps.py` | Последовательность шагов, которые наполняют Job |
-| **UI** | `new/frontend/src/` | Загрузка файла, подписка на прогресс, вкладки по ключам `results` |
+| **UI** | `frontend/src/` | Загрузка файла, подписка на прогресс, вкладки по ключам `results` |
 
 Фронтенд **не считает** метрики и **не знает** алгоритмов. Он показывает то, что сервер положил в `job.results`, и скачивает файлы из `output/`.
 
@@ -46,8 +46,8 @@
 
 Локально (два терминала):
 
-- API: `new/backend` → `python run_dev.py` → **http://127.0.0.1:8021**
-- UI: `new/frontend` → `npm run dev` → **http://localhost:5190** (проксирует `/api` на 8021)
+- API: `backend` → `python run_dev.py` → **http://127.0.0.1:8021**
+- UI: `frontend` → `npm run dev` → **http://localhost:5190** (проксирует `/api` на 8021)
 
 Пошаговая установка — [getting-started.md](getting-started.md).
 
@@ -55,20 +55,19 @@
 ai-ds/
 ├── docs/                          ← вы здесь
 ├── datasets/                      ← тестовые CSV/XLSX
-├── new/
-│   ├── backend/app/
-│   │   ├── main.py                точка входа FastAPI
-│   │   ├── config.py              Ollama, CORS, модели
-│   │   ├── jobs.py                Job + SSE + job_state.json
-│   │   ├── models.py              Pydantic-схемы API
-│   │   ├── api/routes.py          HTTP
-│   │   ├── api/artifacts.py       скачивание / пересборка файлов
-│   │   └── core/                  вся аналитика
-│   └── frontend/src/
-│       ├── App.jsx                состояние приложения
-│       ├── api.js                 fetch + SSE
-│       ├── constants.js           шаги степпера и вкладки
-│       └── components/            UI
+├── backend/app/
+│   ├── main.py                    точка входа FastAPI
+│   ├── config.py                  Ollama, CORS, модели
+│   ├── jobs.py                    Job + SSE + job_state.json
+│   ├── models.py                  Pydantic-схемы API
+│   ├── api/routes.py              HTTP
+│   ├── api/artifacts.py           скачивание / пересборка файлов
+│   └── core/                      вся аналитика
+├── frontend/src/
+│   ├── App.jsx                    состояние приложения
+│   ├── api.js                     fetch + SSE
+│   ├── constants.js               шаги степпера и вкладки
+│   └── components/                UI
 └── old/                           не трогать, если чините текущий продукт
 ```
 
@@ -183,7 +182,7 @@ store.complete
 На диске:
 
 ```
-new/backend/data/jobs/{job_id}/
+backend/data/jobs/{job_id}/
 ├── job_state.json          полный Job (переживает рестарт сервера)
 ├── analysis_df.pkl         обработанные DataFrame (для песочницы)
 ├── inputs/                 исходные файлы
@@ -225,7 +224,7 @@ new/backend/data/jobs/{job_id}/
 
 ## Чего не делать
 
-- Не править `old/` и `DOCUMENTATION.md`, ожидая эффект в UI `new/`.
+- Не править `old/` и `DOCUMENTATION.md`, ожидая эффект в текущем UI.
 - Не добавлять `exec` LLM-кода в основной пайплайн — это сознательно убрали.
 - Не джойнить таблицы «для удобства» без явной задачи: продукт анализирует их по отдельности.
 - Не класть секреты в репозиторий; Ollama — локальный HTTP без ключа.

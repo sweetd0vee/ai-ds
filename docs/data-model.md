@@ -2,7 +2,7 @@
 
 ## Объект Job
 
-Хранится в памяти, на диске (`job_state.json`) и передаётся в SSE/REST.
+Память + `job_state.json` + SSE/REST.
 
 ### Ответ API (`JobStatusResponse`)
 
@@ -10,9 +10,9 @@
 interface JobStatusResponse {
   job_id: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'unknown'
-  step: string           // ID этапа пайплайна
-  progress: number       // 0–100
-  message: string        // Сообщение для UI
+  step: string
+  progress: number
+  message: string
   error: string | null
   filename: string
   filenames?: string[]
@@ -22,51 +22,40 @@ interface JobStatusResponse {
 }
 ```
 
+На диске у Job ещё есть `file_paths`, `analysis_path`, timestamps — в HTTP-снимок они не входят.
+
 ---
 
 ## Объект `results`
 
-Накапливается по мере прохождения пайплайна. Ключи появляются не все сразу.
+Ключи появляются постепенно. При нескольких таблицах детализация часто лежит в `tables[i]`, а корневые поля дублируют **первую** таблицу или склеенный текст.
 
-### Таблица полей
-
-| Ключ | Тип | Этап появления | Описание |
-|------|-----|----------------|----------|
-| `preview` | `list[dict]` | preparing | Первые 20 строк анализируемой таблицы |
-| `columns` | `list[str]` | preparing | Имена столбцов |
-| `shape` | `[int, int]` | preparing | [строки, столбцы] |
-| `tables` | `list[object]` | preparing | Исходные таблицы: id, name, preview, structure |
-| `table_count` | `int` | preparing | Число загруженных таблиц |
-| `relations` | `object` | preparing | Найденные join/union связи |
-| `join_plan` | `object` | preparing | Какая таблица взята для метрик (`mode: separate`), без join |
-| `relations_raw` | `str` | preparing | Текст отчёта о связях |
-| `graph_count` | `int` | preparing | Запрошенное число графиков |
-| `data_structure_raw` | `str` | structure | Текстовое описание структуры |
-| `data_structure` | `object` | structure | JSON структуры |
-| `parsed_data_structure` | `object` | structure | Дубликат `data_structure` |
-| `quality_report` | `object` | data_insights | Структурированный отчёт качества |
-| `quality_report_raw` | `str` | data_insights | Текст + JSON |
-| `correlations` | `object` | data_insights | Пары и коэффициенты |
-| `correlations_raw` | `str` | data_insights | Текст + JSON |
-| `insights_report_raw` | `str` | data_insights | Объединённый текст для UI |
-| `metrics_plan_raw` | `str` | metrics_plan | Текст плана |
-| `metrics_plan_dict` | `dict` | metrics_plan | `{column: [metrics]}` |
-| `calculation_code` | `str` | metrics_calculation | Справочный псевдокод |
-| `metrics_results_raw` | `str` | metrics_calculation | Результаты расчёта |
-| `code_warnings_metrics` | `list` | metrics_calculation | Предупреждения (пусто в Python-first) |
-| `analysis_summary` | `str` | metrics_analysis | LLM-интерпретация |
-| `hypotheses_raw` | `str` | hypotheses | Сырой ответ LLM |
-| `hypotheses` | `list[dict]` | hypotheses | Распарсенные гипотезы |
-| `viz_code` | `str` | viz_generation | Описание логики графиков |
-| `viz_output` | `str` | viz_generation | Лог построения |
-| `code_warnings_viz` | `list` | viz_generation | Предупреждения визуализации |
-| `plot_files` | `list[str]` | viz_generation | Имена PNG |
-| `plot_details` | `list[dict]` | viz_generation | Метаданные графиков (тип, столбцы, описание) |
-| `final_report` | `str` | final_report | Итоговый TXT-отчёт |
+| Ключ | Этап | Смысл |
+|------|------|--------|
+| `preview`, `columns`, `shape` | preparing | Превью первой таблицы |
+| `tables` | preparing+ | Мета + позже structure/quality/discovery/plots на таблицу |
+| `table_count` | preparing | Число таблиц |
+| `relations`, `relations_raw` | preparing | Join/union-кандидаты, без merge |
+| `graph_count` | preparing | Запрошенный лимит PNG |
+| `data_structure`, `data_structure_raw` | structure | Типы столбцов (одна таблица) |
+| `quality_report`, `quality_report_raw` | insights | Балл качества |
+| `correlations`, `correlations_raw` | insights | Пары связей |
+| `insights_report_raw` | insights+discovery | Текст для вкладки «Инсайты» |
+| `discovery`, `discovery_brief`, `discovery_raw` | discovery | Аномалии, роли, highlights |
+| `hypotheses` | discovery | Python-гипотезы (+ связи таблиц) |
+| `metrics_plan_raw`, `metrics_plan_dict` | metrics | План `{column: [metric]}` |
+| `calculation_code` | metrics | Псевдокод вкладки «Код» |
+| `metrics_results_raw` | metrics | Текст расчёта |
+| `analysis_summary` | metrics_analysis | Комментарий LLM или Python-бриф |
+| `hypotheses_raw` | analysis | Сейчас обычно пусто (LLM гипотез нет) |
+| `hypotheses_python` | analysis | Копия python-списка |
+| `viz_code`, `viz_output` | viz | Описание и лог графиков |
+| `plot_files`, `plot_details` | viz | Имена PNG и метаданные |
+| `final_report` | final_report | Итоговый текст |
 
 ---
 
-## `data_structure` (детально)
+## `data_structure`
 
 ```json
 {
@@ -82,13 +71,11 @@ interface JobStatusResponse {
 }
 ```
 
-### Значения `kind`
-
-`numeric` | `categorical` | `datetime` | `boolean` | `identifier` | `textual`
+`kind`: `numeric` | `categorical` | `datetime` | `boolean` | `identifier` | `textual`
 
 ---
 
-## `quality_report` (детально)
+## `quality_report`
 
 ```json
 {
@@ -113,101 +100,85 @@ interface JobStatusResponse {
 }
 ```
 
-### Коды `issues`
-
-| Код | Смысл |
-|-----|-------|
-| `high_missing` | >50% пропусков |
-| `moderate_missing` | 10–50% пропусков |
-| `constant` | Одно значение |
-| `near_unique` | Почти все уникальны |
-| `likely_identifier` | Похоже на ID |
+Коды `issues`: `high_missing` (>50%), `moderate_missing` (10–50%), `constant`, `near_unique`, `likely_identifier`.
 
 ---
 
-## `correlations` (детально)
+## `correlations`
+
+Три списка: `numeric_pairs` (pearson), `categorical_pairs` (cramers_v), `categorical_numeric` (eta). У пары есть `strength` (текст силы).
+
+---
+
+## `discovery` (сжато)
+
+Ключи: `roles`, `derived`, `highlights`, `concentration`, `outliers`, `implausible`, `label_duplicates`, `group_profiles`, `tests`, `hypotheses`, `kind_labels`.
+
+Роли столбцов: `geo`, `money`, `currency`, `area`, `numeric`, `categorical`, `datetime`, `identifier`.
+
+---
+
+## Элемент `hypotheses[]`
 
 ```json
 {
-  "numeric_pairs": [
-    {
-      "col_a": "price",
-      "col_b": "quantity",
-      "pearson": 0.72,
-      "strength": "сильная"
-    }
-  ],
-  "categorical_pairs": [
-    {
-      "col_a": "region",
-      "col_b": "category",
-      "cramers_v": 0.45,
-      "strength": "умеренная"
-    }
-  ],
-  "categorical_numeric": [
-    {
-      "categorical": "region",
-      "numeric": "revenue",
-      "eta": 0.38,
-      "strength": "умеренная"
-    }
-  ]
+  "id": 1,
+  "kind": "numeric_outlier",
+  "kind_label": "Выбросы",
+  "title": "Выбросы в «price»",
+  "statement": "если … то …",
+  "rationale": "цифры из расчёта",
+  "columns": ["price"],
+  "verification": "как проверить",
+  "priority": "high",
+  "priority_label": "высокий",
+  "source": "python"
 }
 ```
 
----
-
-## `hypotheses[]` (элемент)
-
-```json
-{
-  "id": "H1",
-  "title": "Сезонность продаж",
-  "statement": "Продажи выше в Q4",
-  "rationale": "На основе корреляции date-revenue",
-  "columns": ["date", "revenue"],
-  "verification": "Группировка по кварталам, t-test",
-  "priority": "high"
-}
-```
+`kind`: `geo_outlier`, `numeric_outlier`, `rare_category`, `group_difference`, `quality`, `concentration`, `correlation`, `derived`, `implausible`, `table_relation`.  
+`source`: `python` | `auditor` (ручная) | исторически `llm`.
 
 ---
 
-## Файловая структура задачи
+## `tables[]` (элемент)
+
+id, name, filename, sheet, rows, cols, columns, preview; после анализа — `structure`, `quality_report`, `discovery`, `metrics_plan_dict`, `plot_files`, `plot_details`, текстовые `*_raw`.
+
+---
+
+## Файлы задачи
 
 ```
 data/jobs/{job_id}/
-├── input.csv              # или input.xlsx
-├── job_state.json         # полный Job + results
+├── job_state.json
+├── analysis_df.pkl
+├── inputs/
+│   └── 00_orders.csv
 └── output/
+    ├── relations.txt
     ├── data_structure.xlsx
     ├── quality_report.txt
     ├── correlations.txt
     ├── quality_insights.xlsx
+    ├── discovery_insights.txt
     ├── generated_calculation_code.py
     ├── generated_visualization_code.py
-    ├── analysis_summary_report.txt
-    ├── analysis_summary_report.docx
-    ├── hypotheses_report.txt
-    ├── hypotheses_report.docx
-    ├── final_report.txt
-    ├── final_report.docx
+    ├── analysis_summary_report.txt / .docx
+    ├── hypotheses_report.docx / .xlsx
+    ├── final_report.txt / .docx
     ├── plots_report.docx
-    └── plot_001.png … plot_NNN.png
+    └── plot_001.png …
 ```
 
 ---
 
-## Настройки клиента (localStorage)
+## Настройки клиента
 
-Ключ: `ds-app-settings`
+Ключ localStorage: `ds-app-settings`
 
 ```json
-{
-  "theme": "light",
-  "analystModel": "qwen3:8b"
-}
+{ "theme": "light", "analystModel": "qwen3.8:27b" }
 ```
 
-Не синхронизируется с сервером. Модель применяется только к **следующему** запуску анализа.
+На сервер не синхронизируется. Модель применяется к **следующему** запуску.

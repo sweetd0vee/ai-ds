@@ -1,6 +1,6 @@
 # Пайплайн анализа данных
 
-Точка входа: `run_analysis_pipeline(job_id, store)` в `new/backend/app/core/pipeline.py`.
+Точка входа: `run_analysis_pipeline(job_id, store)` в `backend/app/core/pipeline.py`.
 
 Запускается как фоновая задача после `POST /api/analyze`. Оркестратор только вызывает шаги из `pipeline_steps.py` и в конце `store.complete` / `store.fail`. Общий объект шагов — `PipelineContext` (job, store, таблицы, накопленный `state`).
 

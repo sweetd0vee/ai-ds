@@ -1,222 +1,127 @@
 # Frontend — UI и клиентская логика
 
-Путь: `new/frontend/src/`
+Путь: `frontend/src/`
 
-## Структура исходников
+Dev: порт **5190**, прокси `/api` → `127.0.0.1:8021`.
+
+## Структура
 
 ```
 src/
-├── App.jsx                 # Корневой компонент
-├── App.css                 # Стили компонентов (~1900 строк)
-├── main.jsx                # Bootstrap React
-├── index.css               # Дизайн-токены и 8 тем
-├── api.js                  # HTTP + SSE клиент
-├── settings.js             # Тема и модель в localStorage
-├── constants.js            # Шаги пайплайна и вкладки результатов
+├── App.jsx                 состояние приложения, hero/analysis
+├── App.css
+├── main.jsx
+├── index.css               дизайн-токены, темы
+├── api.js
+├── settings.js             тема + модель, localStorage
+├── constants.js            PIPELINE_STEPS, RESULT_SECTIONS
 ├── hooks/
 │   ├── useJobStream.js
-│   └── useSettings.js
+│   ├── useSettings.js
+│   └── useActiveTable.js
 ├── components/
 │   ├── AppHeader.jsx
 │   ├── UploadSection.jsx
 │   ├── PipelineStepper.jsx
+│   ├── ProgressPanel.jsx
 │   ├── StatsCards.jsx
 │   ├── ErrorAlert.jsx
 │   ├── SettingsModal.jsx
+│   ├── HistoryModal.jsx
 │   ├── CodeSandbox.jsx
 │   └── results/
-│       ├── ResultsPanel.jsx      # Оболочка результатов
-│       ├── sectionMeta.js        # hasData / textContent
-│       ├── PreviewTable.jsx
+│       ├── ResultsPanel.jsx
+│       ├── ResultsNav.jsx
+│       ├── ResultsToolbar.jsx
+│       ├── DatasetSwitcher.jsx
+│       ├── sectionMeta.js
+│       ├── PreviewView.jsx / PreviewTable.jsx
 │       ├── StructureView.jsx
+│       ├── RelationsView.jsx
 │       ├── InsightsView.jsx
 │       ├── MetricsPlanView.jsx
+│       ├── MetricsResultsView.jsx
 │       ├── AnalysisView.jsx
 │       ├── HypothesesView.jsx
 │       ├── ReportView.jsx
 │       ├── PlotsGallery.jsx
-│       ├── CopyButton.jsx
-│       └── textFormat.jsx
-├── utils/
-│   ├── format.js
-│   └── icons.js
-└── styles/
-    └── theme-overrides.css
+│       ├── PlotLightbox.jsx
+│       └── …
+└── styles/                 layout, results, progress, …
 ```
 
 ---
 
-## Режимы интерфейса
+## Режимы
 
-### Hero-режим (`app--hero`)
+**Hero** (`!job && !loading`): крупная зона загрузки.
 
-Условие: нет активной задачи и не идёт загрузка (`!job && !loading`).
-
-- Полноэкранная зона загрузки по центру.
-- Заголовок «Электронный Датасаентист».
-- Список возможностей внизу.
-
-### Режим анализа (`app--analysis`)
-
-Условие: `job || loading`.
-
-Двухколоночная сетка:
-
-| Левая колонка | Правая колонка |
-|---------------|----------------|
-| Компактная загрузка (dock) | `ResultsPanel` |
-| Прогресс, степпер, статистика | 11 вкладок результатов |
-
-Переход анимирован через `framer-motion` (`layoutId="upload-shell"`).
+**Анализ** (`job || loading`): слева `ProgressPanel` (загрузка-док, степпер, статистика), справа `ResultsPanel`.
 
 ---
 
-## Поток данных в `App.jsx`
+## Поток в `App.jsx`
 
-```mermaid
-flowchart LR
-    A[handleFile] --> B[file state]
-    B --> C[onAnalyze]
-    C --> D[startAnalysis API]
-    D --> E[jobId]
-    E --> F[startStream SSE]
-    F --> G[job.results]
-    G --> H[ResultsPanel]
+```
+файлы → onAnalyze → startAnalysis
+                   → jobId
+                   → startStream (SSE)
+                   → job.results → вкладки
 ```
 
-**Локальное состояние:**
-- `file`, `dragOver`, `graphCount`, `jobId`, `activeSection`, `elapsed`
-- `analystModels` из `GET /api/config`
-
-**Из хуков:**
-- `job`, `loading`, `error` — `useJobStream`
-- `settings`, `draft`, modal — `useSettings`
+Ещё: история (`HistoryModal` → `GET /jobs` → `getJobStatus`), настройки, таймер `elapsed`.
 
 ---
 
 ## Хуки
 
-### `useJobStream`
+**`useJobStream`** — SSE + поллинг 2 с, `loading=false` на completed/failed.
 
-| Export | Поведение |
-|--------|-----------|
-| `startStream(id)` | Открывает SSE, `loading=true` |
-| `job` | Последний payload с сервера |
-| `loading` | false при completed/failed |
-| `setError` | Ошибки валидации файла / сети |
+**`useSettings`** — `ds-app-settings` в localStorage; live preview темы.
 
-При обрыве SSE — fallback `getJobStatus`.
-
-### `useSettings`
-
-- `settings` — persisted в `localStorage` (`ds-app-settings`).
-- `draft` — редактируемая копия в модалке.
-- `applyTheme` при смене темы (live preview).
+**`useActiveTable`** — какая таблица выбрана, когда `results.tables.length > 1`.
 
 ---
 
-## Вкладки результатов
+## Вкладки
 
-Конфигурация: `constants.js` → `RESULT_SECTIONS` (11 вкладок).
+`RESULT_SECTIONS` в `constants.js`:
 
-| ID | Компонент | Ключевые поля `results` |
-|----|-----------|-------------------------|
-| `preview` | `PreviewTable` | `preview`, `shape` |
-| `structure` | `StructureView` | `data_structure` |
-| `insights` | `InsightsView` | `quality_report`, `correlations` |
+| ID | Компонент | Откуда данные |
+|----|-----------|----------------|
+| `preview` | `PreviewView` | `preview` / `tables` |
+| `structure` | `StructureView` | `data_structure` / `tables[].structure` |
+| `relations` | `RelationsView` | `relations` |
+| `insights` | `InsightsView` | качество + discovery |
 | `metrics_plan` | `MetricsPlanView` | `metrics_plan_dict` |
-| `calculation_code` | `CodeSandbox` | `calculation_code` |
-| `metrics` | `<pre>` | `metrics_results_raw` |
+| `calculation_code` | `CodeSandbox` | `calculation_code` + `run-code` |
+| `metrics` | `MetricsResultsView` | `metrics_results_raw` |
 | `analysis` | `AnalysisView` | `analysis_summary` |
 | `hypotheses` | `HypothesesView` | `hypotheses` |
 | `viz_code` | `<pre>` | `viz_code` |
 | `report` | `ReportView` | `final_report` |
-| `plots` | `PlotsGallery` | `plot_files` |
+| `plots` | `PlotsGallery` + lightbox | `plot_files` / по таблице |
 
-### Индикаторы в навигации
+Точка «есть данные»: `sectionHasData` в `sectionMeta.js`.
 
-`sectionHasData(id, results)` — класс `has-data` и точка `nav-dot`.
-
-### Панель действий (toolbar)
-
-| Вкладка | Действия |
-|---------|----------|
-| Любая с текстом | Копировать |
-| Качество | XLSX (`quality_insights.xlsx`) |
-| Анализ | DOCX анализа |
-| Гипотезы | DOCX гипотез |
-| Структура | XLSX |
-| Графики | DOCX-отчёт по графикам (`plots_report.docx`) |
-| Отчёт | DOCX итогового отчёта |
-
-Скачивание DOCX/XLSX — через `downloadJobFile` (fetch + blob), не прямая ссылка.
+Тулбар: копировать, скачать XLSX/DOCX, экспорт выбранных гипотез, zip графиков — `ResultsToolbar.jsx` + `api.js`.
 
 ---
 
-## Форматирование текста
+## Темы
 
-### `textFormat.jsx`
+8 штук в `settings.js` (`light`, `ocean`, `dark`, `dracula`, …). Атрибуты `data-theme` и `data-theme-mode` на документе.
 
-- `AnalysisInline` — парсинг `**жирный**`.
-- `parseReportSections` — разбиение отчёта по `1. Заголовок`.
-- `FeatureLine` — шаблон `**Имя** — описание`.
-
-### `AnalysisView` / `ReportView`
-
-Рендерят LLM-текст и итоговый отчёт в читаемые блоки (списки, подзаголовки, KV-пары).
+Модель LLM из настроек уходит **только в следующий** `POST /analyze`.
 
 ---
 
-## Темы оформления
+## API-клиент
 
-8 тем в `settings.js`:
-
-| ID | Режим | Описание |
-|----|-------|----------|
-| `light` | light | Светлая нейтральная |
-| `ocean` | light | Голубые оттенки |
-| `dark` | dark | Тёмная нейтральная |
-| `dracula` | dark | Фиолетово-розовая |
-| `nord` | dark | Арктическая |
-| `solarized` | dark | Тёплая Solarized |
-| `catppuccin` | dark | Пастельная |
-| `monokai` | dark | Редакторская |
-
-Механизм:
-- `data-theme` — палитра CSS-переменных (`index.css`).
-- `data-theme-mode` — `light` / `dark` для оверрайдов (`theme-overrides.css`).
+База `/api`. Разбор ошибок FastAPI — `parseApiDetail`. Скачивание — blob, не прямая `<a href>` для DOCX (иначе легко сломать имя файла).
 
 ---
 
-## API-клиент (`api.js`)
+## Степпер
 
-База: `/api` (прокси Vite в dev).
-
-Ключевые функции — см. [api-reference.md](api-reference.md).
-
-Вспомогательные:
-- `parseApiDetail` — единый разбор ошибок FastAPI.
-- `triggerBlobDownload` — программное скачивание blob.
-
----
-
-## Сборка и dev
-
-| Команда | Действие |
-|---------|----------|
-| `npm run dev` | Vite :5173, proxy `/api` → :8010 |
-| `npm run build` | Production в `dist/` |
-| `npm run preview` | Просмотр `dist/` |
-
-Конфиг: `vite.config.js` — только proxy и порт, без алиасов.
-
----
-
-## Степпер прогресса
-
-`PipelineStepper` синхронизирован с `PIPELINE_STEPS` (11 шагов, включая `hypotheses_generation`).
-
-Логика подсветки:
-- **done** — индекс < текущего или `step === 'completed'`
-- **active** — текущий индекс и `status === 'running'` (спиннер)
-- **error** — `status === 'failed'` на текущем шаге
+`PIPELINE_STEPS` должен совпадать с `store.update(..., step=...)` на бэке. Логика: done / active / error по индексу текущего `job.step`.
